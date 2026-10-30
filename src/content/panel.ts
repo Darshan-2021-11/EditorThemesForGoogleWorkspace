@@ -18,10 +18,9 @@ import { PANEL_CSS } from './panel-css';
 
 export interface PanelHost {
   getState(): PageState;
-  /** Temporarily show themes without saving (null = keep the saved one for that side). */
-  preview(ui: ThemeSpec | null | undefined, doc: ThemeSpec | null | undefined): void;
+  /** Temporarily show a theme without saving it. */
+  preview(spec: ThemeSpec | null): void;
   endPreview(): void;
-  hasDocument: boolean;
 }
 
 const SLOT_LABELS: Record<string, string> = {
@@ -59,7 +58,7 @@ export class Panel {
   private hostEl: HTMLElement | null = null;
   private root!: ShadowRoot;
   private body!: HTMLElement;
-  private tab: PanelTab = 'ui';
+  private tab: PanelTab = 'theme';
   private schemes: Scheme[] = [];
   private settings: GlobalSettings | null = null;
   private query = '';
@@ -67,7 +66,6 @@ export class Panel {
   private status = '';
   private importing = false;
   private draft: Scheme | null = null;
-  private draftTargets = { ui: true, doc: true };
   private optionsCache = new Map<string, ThemeOptions>();
   private previewTimer = 0;
 
@@ -137,7 +135,7 @@ export class Panel {
 
   private render() {
     const state = this.host.getState();
-    const roles = schemeToRoles((state.ui ?? state.doc)?.scheme ?? FALLBACK_SCHEME);
+    const roles = schemeToRoles(state.theme?.scheme ?? FALLBACK_SCHEME);
     this.body.setAttribute(
       'style',
       `--bg:${hex(roles.bg)};--surface:${hex(roles.surface)};--surface2:${hex(roles.surfaceAlt)};--muted:${hex(roles.muted)};` +
@@ -145,10 +143,8 @@ export class Panel {
         `--ok:${hex(roles.accents.green)};color-scheme:${roles.isDark ? 'dark' : 'light'}`,
     );
     const tabs: [PanelTab, string][] = [
-      ['ui', 'Interface'], ...(this.host.hasDocument ? [['doc', 'Document'] as [PanelTab, string]] : []),
-      ['library', 'Get themes'], ['custom', 'Custom'], ['settings', 'Settings'],
+      ['theme', 'Theme'], ['library', 'Get themes'], ['custom', 'Custom'], ['settings', 'Settings'],
     ];
-    if (this.tab === 'doc' && !this.host.hasDocument) this.tab = 'ui';
     this.body.replaceChildren(
       h('header', {},
         h('div', { class: 'title' }, 'Workspace Dark'),
@@ -174,17 +170,16 @@ export class Panel {
 
   private renderTab(state: PageState): Node {
     switch (this.tab) {
-      case 'ui': return this.renderPicker('ui', state.ui);
-      case 'doc': return this.renderPicker('doc', state.doc);
+      case 'theme': return this.renderPicker(state.theme);
       case 'library': return this.renderLibrary();
       case 'custom': return this.renderCustom(state);
       case 'settings': return this.renderSettings(state);
     }
   }
 
-  // ---- Interface / Document pickers -------------------------------------------------------
+  // ---- Theme picker -----------------------------------------------------------------------
 
-  private renderPicker(side: 'ui' | 'doc', current: ThemeSpec | null): Node {
+  private renderPicker(current: ThemeSpec | null): Node {
     const wrap = h('div', { class: 'picker' });
     if (!this.schemes.length) {
       wrap.append(
@@ -193,24 +188,23 @@ export class Panel {
       );
       return wrap;
     }
-    const what = side === 'ui' ? 'Google interface (toolbars, menus, sidebars)' : 'Document content (page, text, highlights)';
     wrap.append(
       h('div', { class: 'current' },
         h('div', {},
-          h('div', { class: 'label' }, what),
+          h('div', { class: 'label' }, 'Interface and document'),
           h('div', { class: 'name' }, current ? current.scheme.name : 'Off — Google default'),
         ),
-        current && h('button', { class: 'btn', onclick: () => this.choose(side, null) }, 'Turn off'),
+        current && h('button', { class: 'btn', onclick: () => this.choose(null) }, 'Turn off'),
       ),
     );
-    if (current) wrap.append(this.renderOptions(side, current));
+    if (current) wrap.append(this.renderOptions(current));
     const list = h('div', { class: 'list', role: 'listbox', onmouseleave: () => this.host.endPreview() });
     const fill = () => {
       const q = this.query.toLowerCase();
       list.replaceChildren(
         ...this.schemes
           .filter((s) => (this.filter === 'all' || s.variant === this.filter) && (!q || s.name.toLowerCase().includes(q) || s.author.toLowerCase().includes(q)))
-          .map((s) => this.renderRow(s, side, current?.scheme.id === s.id)),
+          .map((s) => this.renderRow(s, current?.scheme.id === s.id)),
       );
       if (!list.childElementCount) list.append(h('p', { class: 'empty' }, 'No matches.'));
     };
@@ -232,13 +226,13 @@ export class Panel {
     return wrap;
   }
 
-  private renderRow(s: Scheme, side: 'ui' | 'doc', selected: boolean): Node {
+  private renderRow(s: Scheme, selected: boolean): Node {
     const p = s.palette;
     return h('button', {
       class: selected ? 'row on' : 'row', role: 'option', 'aria-selected': String(selected), title: s.author,
-      onmouseenter: () => this.schedulePreview(side, s),
-      onfocus: () => this.schedulePreview(side, s),
-      onclick: () => this.choose(side, s.id),
+      onmouseenter: () => this.schedulePreview(s),
+      onfocus: () => this.schedulePreview(s),
+      onclick: () => this.choose(s.id),
     },
       h('span', { class: 'swatch', style: `background:${p.base00};color:${p.base05};border-color:${p.base02}` },
         h('span', { class: 'aa' }, 'Aa'),
@@ -250,21 +244,20 @@ export class Panel {
     );
   }
 
-  private schedulePreview(side: 'ui' | 'doc', s: Scheme) {
+  private schedulePreview(s: Scheme) {
     clearTimeout(this.previewTimer);
     this.previewTimer = window.setTimeout(async () => {
-      const spec = { scheme: s, options: await this.options(s.id) };
-      this.host.preview(side === 'ui' ? spec : undefined, side === 'doc' ? spec : undefined);
+      this.host.preview({ scheme: s, options: await this.options(s.id) });
     }, 90);
   }
 
-  private async choose(side: 'ui' | 'doc', id: string | null) {
+  private async choose(id: string | null) {
     clearTimeout(this.previewTimer);
     this.host.endPreview();
-    await send({ type: 'setPageThemes', [side]: id });
+    await send({ type: 'setPageTheme', theme: id });
   }
 
-  private renderOptions(side: 'ui' | 'doc', current: ThemeSpec): Node {
+  private renderOptions(current: ThemeSpec): Node {
     const o = current.options;
     const set = async (patch: Partial<ThemeOptions>) => {
       const next = { ...o, ...patch };
@@ -279,12 +272,12 @@ export class Panel {
           h('button', { class: o.mapping === 'keep-hue' ? 'on' : '', title: 'Keep original hues, fix lightness for contrast', onclick: () => set({ mapping: 'keep-hue' }) }, 'Keep hue'),
         ),
       ),
-      side === 'doc' && h('label', { class: 'check' },
+      h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: o.styleColors, onchange: (e: Event) => set({ styleColors: (e.target as HTMLInputElement).checked }) }),
         'Color text by paragraph style',
       ),
-      side === 'doc' && o.styleColors && this.renderStyleSlots(current, (slots) => set({ styleSlots: slots })),
-      side === 'doc' && h('label', { class: 'check' },
+      o.styleColors && this.renderStyleSlots(current, (slots) => set({ styleSlots: slots })),
+      h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: o.dimImages, onchange: (e: Event) => set({ dimImages: (e.target as HTMLInputElement).checked }) }),
         'Dim images',
         o.dimImages && h('input', {
@@ -381,7 +374,7 @@ export class Panel {
   private renderCustom(state: PageState): Node {
     if (!this.schemes.length) return h('p', { class: 'empty' }, 'Import a theme first, then customise it here.');
     if (!this.draft) {
-      const base = (state.ui ?? state.doc)?.scheme ?? this.schemes[0];
+      const base = state.theme?.scheme ?? this.schemes[0];
       this.startDraft(base);
     }
     const d = this.draft!;
@@ -389,8 +382,7 @@ export class Panel {
     const live = () => {
       clearTimeout(this.previewTimer);
       this.previewTimer = window.setTimeout(() => {
-        const spec = { scheme: { ...d, palette: { ...d.palette } }, options: DEFAULT_OPTIONS };
-        this.host.preview(this.draftTargets.ui ? spec : undefined, this.draftTargets.doc ? spec : undefined);
+        this.host.preview({ scheme: { ...d, palette: { ...d.palette } }, options: DEFAULT_OPTIONS });
       }, 60);
     };
     return h('div', { class: 'custom' },
@@ -418,11 +410,6 @@ export class Panel {
           ),
         ),
       ),
-      h('div', { class: 'opt-row' },
-        h('span', { class: 'label' }, 'Preview on'),
-        h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: this.draftTargets.ui, onchange: (e: Event) => { this.draftTargets.ui = (e.target as HTMLInputElement).checked; live(); } }), 'Interface'),
-        this.host.hasDocument && h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: this.draftTargets.doc, onchange: (e: Event) => { this.draftTargets.doc = (e.target as HTMLInputElement).checked; live(); } }), 'Document'),
-      ),
       h('div', { class: 'actions' },
         h('button', { class: 'btn', onclick: () => { this.host.endPreview(); live(); } }, 'Preview'),
         h('button', { class: 'btn', onclick: () => { this.draft = null; this.host.endPreview(); this.render(); } }, 'Reset'),
@@ -433,11 +420,7 @@ export class Panel {
             this.draft = { ...saved, palette: { ...saved.palette } };
             await this.reload();
             this.host.endPreview();
-            await send({
-              type: 'setPageThemes',
-              ...(this.draftTargets.ui ? { ui: saved.id } : {}),
-              ...(this.draftTargets.doc && this.host.hasDocument ? { doc: saved.id } : {}),
-            });
+            await send({ type: 'setPageTheme', theme: saved.id });
             this.status = `Saved “${saved.name}” and applied it.`;
             this.render();
           },
@@ -484,23 +467,16 @@ export class Panel {
     return h('div', { class: 'settings' },
       h('label', { class: 'check big' },
         h('input', { type: 'checkbox', checked: s.autoApply, onchange: (e: Event) => patch({ autoApply: (e.target as HTMLInputElement).checked }) }),
-        h('span', {}, h('b', {}, 'Auto-apply everywhere'), h('br'), h('span', { class: 'hint' }, 'Use the default themes on every Google page you haven’t set individually.')),
+        h('span', {}, h('b', {}, 'Auto-apply everywhere'), h('br'), h('span', { class: 'hint' }, 'Use the default theme on every Google page you haven’t set individually.')),
       ),
       h('div', { class: 'card' },
-        h('div', {}, 'Default interface: ', h('b', {}, nameOf(s.defaultUi))),
-        h('div', {}, 'Default document: ', h('b', {}, nameOf(s.defaultDoc))),
-        h('button', {
-          class: 'btn',
-          disabled: !state.ui && !state.doc,
-          onclick: () => patch({ defaultUi: state.ui?.scheme.id ?? s.defaultUi, defaultDoc: state.doc?.scheme.id ?? s.defaultDoc }),
-        }, 'Use this page’s themes as defaults'),
-      ),
-      h('div', { class: 'card' },
-        h('div', { class: 'label' }, 'Revert this page to Google’s default'),
+        h('div', {}, 'Default theme: ', h('b', {}, nameOf(s.defaultTheme))),
         h('div', { class: 'actions' },
-          h('button', { class: 'btn', onclick: () => send({ type: 'setPageThemes', ui: null }) }, 'Interface'),
-          this.host.hasDocument && h('button', { class: 'btn', onclick: () => send({ type: 'setPageThemes', doc: null }) }, 'Document'),
-          h('button', { class: 'btn', onclick: () => send({ type: 'setPageThemes', ui: null, doc: null }) }, 'Both'),
+          h('button', {
+            class: 'btn', disabled: !state.theme,
+            onclick: () => patch({ defaultTheme: state.theme?.scheme.id ?? s.defaultTheme }),
+          }, 'Use this page’s theme as default'),
+          h('button', { class: 'btn', disabled: !state.theme, onclick: () => send({ type: 'setPageTheme', theme: null }) }, 'Revert this page to Google’s look'),
         ),
       ),
       h('div', { class: 'card' },

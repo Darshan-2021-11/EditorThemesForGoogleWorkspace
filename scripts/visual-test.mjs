@@ -53,23 +53,21 @@ try {
   }
   console.log('import dracula', JSON.stringify(await bridge({ wdTest: 'import', url: 'https://github.com/dracula/base16-dracula-scheme/blob/master/dracula.yaml' })));
 
-  const combos = [
-    ['1-nord-nord', 'base16-nord', 'base16-nord'],
-    ['2-nord-ui-default-doc', 'base16-nord', null],
-    ['3-monokai-monokai', 'base16-monokai', 'base16-monokai'],
-    ['4-onedark-ui-solarized-light-doc', 'base24-one-dark', 'base16-solarized-light'],
-    ['5-dracula-dracula', 'base16-dracula', 'base16-dracula'],
+  const themes = [
+    ['1-nord', 'base16-nord'],
+    ['2-solarized-light', 'base16-solarized-light'],
+    ['3-monokai', 'base16-monokai'],
+    ['4-one-dark', 'base24-one-dark'],
+    ['5-dracula', 'base16-dracula'],
   ];
-  for (const [name, ui, doc] of combos) {
-    await bridge({ wdTest: 'set', ui, doc });
+  for (const [name, theme] of themes) {
+    await bridge({ wdTest: 'set', theme });
     await shot(name);
   }
 
-  await bridge({ wdTest: 'set', ui: 'base16-nord', doc: 'base16-nord' });
-  await bridge({ wdTest: 'panel', tab: 'ui' });
-  await shot('6-panel-ui', 1500);
-  await bridge({ wdTest: 'panel', tab: 'doc' });
-  await shot('6b-panel-doc', 1000);
+  await bridge({ wdTest: 'set', theme: 'base16-nord' });
+  await bridge({ wdTest: 'panel', tab: 'theme' });
+  await shot('6-panel-theme', 1500);
   await bridge({ wdTest: 'panel', tab: 'library' });
   await shot('7-panel-library', 1000);
 
@@ -84,7 +82,7 @@ try {
   // Print: let Docs run its own print preparation (window.print stubbed so no dialog opens),
   // then print the page to PDF with backgrounds OFF (the browser default) to prove the theme survives.
   await driver.executeScript(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
-  await bridge({ wdTest: 'set', ui: 'base16-nord', doc: 'base16-solarized-light' });
+  await bridge({ wdTest: 'set', theme: 'base16-solarized-light' });
   await driver.sleep(2000);
   await driver.executeAsyncScript((done) => {
     window.print = () => done(true);
@@ -93,10 +91,10 @@ try {
     setTimeout(() => done(false), 20000);
   });
   const pdf = await driver.printPage({ background: false, pageRanges: ['1-2'] });
-  await writeFile(`${OUT}/print-solarized-light-doc.pdf`, pdf, 'base64');
-  console.log('printed', `${OUT}/print-solarized-light-doc.pdf`);
+  await writeFile(`${OUT}/print-solarized-light.pdf`, pdf, 'base64');
+  console.log('printed', `${OUT}/print-solarized-light.pdf`);
 
-  await bridge({ wdTest: 'set', ui: null, doc: null });
+  await bridge({ wdTest: 'set', theme: null });
   await shot('9-reverted');
   console.log('done →', OUT);
 } finally {

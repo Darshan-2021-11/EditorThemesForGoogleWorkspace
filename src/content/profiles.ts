@@ -5,22 +5,24 @@ import type { AppId } from '../shared/page';
 
 export interface AppProfile {
   app: AppId;
-  /** Elements belonging to the document (doc theme only). Empty = app has no document surface. */
+  /** Elements belonging to the document. Empty = app has no document surface. */
   docRegion: string;
-  /** Stylesheet selector fragments that style the document surface. */
-  docRuleHints: string[];
   /** Whether document content is painted on <canvas> (handled by the hook). */
   canvasDoc: boolean;
   /** Elements whose inline colors must stay true (color pickers outside the document's controls). */
   keepColors: string;
   /**
-   * Controls that show document colors (toolbar color indicators, color palettes). They use the
-   * document theme so a swatch looks exactly like the result on the page.
+   * Controls that show document colors (toolbar color indicators, color palettes). They are
+   * mapped like document content so a swatch looks exactly like the result on the page.
    */
-  docColorControls?: { text: string; fill: string; palettes: string };
-  /** CSS for the document surface while a document theme is on. */
+  docColorControls?: {
+    text: string; fill: string; palettes: string;
+    /** The text-color button's color bar, plus the toolbar boxes describing the cursor's text. */
+    textIndicator: string; fontSize: string; zoom: string; paragraphStyle: string;
+  };
+  /** CSS for the document surface. */
   docCss(r: Roles): string;
-  /** Extra UI CSS while a UI theme is on. */
+  /** Extra UI CSS. */
   uiCss(r: Roles): string;
 }
 
@@ -31,13 +33,17 @@ const KEEP_COLORS = '[class*="colorpalette"], [class*="color-palette"], [class*=
 const docs: AppProfile = {
   app: 'docs',
   docRegion: '.kix-page-paginated, .kix-page-compact, .kix-page, .kix-canvas-tile-content, .kix-lineview, .kix-page-content-wrapper',
-  docRuleHints: ['kix-page', 'kix-lineview', 'kix-canvas-tile', 'kix-wordhtmlgenerator', 'kix-paginateddocumentplugin'],
   canvasDoc: true,
   keepColors: KEEP_COLORS,
   docColorControls: {
-    text: '.docs-textcolormenubutton, #textColorButton, [aria-label^="Text colo"]',
-    fill: '#bgColorButton, .docs-highlightcolormenubutton, [aria-label^="Highlight colo"]',
+    // both color buttons share .docs-textcolormenubutton, so match them by id/label
+    text: '#textColorButton, [aria-label^="Text colo"]',
+    fill: '#bgColorButton, [aria-label^="Highlight colo"]',
     palettes: '.docs-colormenuitems, .docs-material-colorpalette, .docs-customcolorpalette, .goog-palette, .jfk-palette',
+    textIndicator: '#textColorButton .goog-color-menu-button-indicator',
+    fontSize: 'input[aria-label="Font size"]',
+    zoom: 'input[aria-label="Zoom"]',
+    paragraphStyle: '#headingStyleSelect',
   },
   docCss: (r) => `
     .kix-page-paginated, .kix-page-compact, .kix-page, .kix-page-content-wrapper,
@@ -49,7 +55,6 @@ const docs: AppProfile = {
 const sheets: AppProfile = {
   app: 'sheets',
   docRegion: '#waffle-grid-container, .grid4-inner-container, .grid-container',
-  docRuleHints: ['waffle', 'grid4-inner-container', 'grid-container'],
   canvasDoc: true,
   keepColors: KEEP_COLORS,
   // Only layers *below* the grid canvas: .grid4-inner-container sits above it (z-index 3).
@@ -60,7 +65,6 @@ const sheets: AppProfile = {
 const plain = (app: AppId): AppProfile => ({
   app,
   docRegion: '',
-  docRuleHints: [],
   canvasDoc: false,
   keepColors: KEEP_COLORS,
   docCss: () => '',

@@ -1,6 +1,6 @@
-// Applies a UI theme and a document theme to the current frame.
+// Applies one theme to the current frame: Google's interface and the document content.
 import { send } from '../shared/messages';
-import { CONFIG_EVENT, READY_EVENT } from '../shared/hook-protocol';
+import { ANSWER_EVENT, CONFIG_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
 import { formatColor, hex8, luminance, parseColor, type RGBA } from '../theme/color';
 import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles, type Roles } from '../theme/roles';
@@ -16,6 +16,8 @@ const INLINE: [string, string, ColorKind, string][] = [
   ['background-color', 'data-wd-bg', 'fill', 'background-color'],
   ['color', 'data-wd-fg', 'text', 'color'],
   ['border-top-color', 'data-wd-bc', 'line', 'border-color'],
+  // Docs' toolbar color indicators are a colored bottom border
+  ['border-bottom-color', 'data-wd-bbc', 'line', 'border-bottom-color'],
   ['fill', 'data-wd-fill', 'text', 'fill'],
   ['stroke', 'data-wd-stroke', 'text', 'stroke'],
 ];
@@ -40,10 +42,9 @@ interface SheetSource {
 }
 
 export class PageThemer {
-  private ui: Mapper | null = null;
-  private doc: Mapper | null = null;
-  private uiRoles: Roles | null = null;
-  private docSpec: ThemeSpec | null = null;
+  private mapper: Mapper | null = null;
+  private roles: Roles | null = null;
+  private spec: ThemeSpec | null = null;
   private sources = new Map<Element, SheetSource>();
   private pending = new Set<Element>();
   private crossOriginCache = new Map<string, Promise<string | null>>();
@@ -93,15 +94,13 @@ export class PageThemer {
   }
 
   get active() {
-    return !!(this.ui || this.doc);
+    return !!this.mapper;
   }
 
-  update(ui: ThemeSpec | null, doc: ThemeSpec | null) {
-    if (!this.profile.docRegion) doc = null;
-    this.uiRoles = ui ? schemeToRoles(ui.scheme) : null;
-    this.ui = ui && this.uiRoles ? createMapper(this.uiRoles, ui.options) : null;
-    this.doc = doc ? createMapper(schemeToRoles(doc.scheme), doc.options) : null;
-    this.docSpec = doc;
+  update(spec: ThemeSpec | null) {
+    this.spec = spec;
+    this.roles = spec ? schemeToRoles(spec.scheme) : null;
+    this.mapper = spec && this.roles ? createMapper(this.roles, spec.options) : null;
     this.sendHookConfig();
     if (!this.active) return this.teardown();
     this.writeBase();
@@ -112,14 +111,14 @@ export class PageThemer {
 
   private sendHookConfig() {
     if (!this.profile.canvasDoc) return;
-    window.dispatchEvent(new CustomEvent(CONFIG_EVENT, { detail: JSON.stringify(this.docSpec) }));
+    window.dispatchEvent(new CustomEvent(CONFIG_EVENT, { detail: JSON.stringify(this.spec) }));
   }
 
   // ----------------------------------------------------------------------------------------
   // Base stylesheet: variables, page background, icons, document surface
 
   private writeBase() {
-    const r = this.uiRoles;
+    const r = this.roles;
     let css = '';
     if (r) {
       const fgL = luminance(r.fg);
@@ -129,9 +128,9 @@ export class PageThemer {
         `--wd-icon-filter:${r.isDark ? `invert(1) hue-rotate(180deg) brightness(${bright.toFixed(2)})` : 'none'};}` +
         `html,body{background-color:${hex(r.bg)};}` +
         `::selection{background-color:${formatColor({ ...r.selection, a: 0.85 })};}` +
-        this.profile.uiCss(r);
+        this.profile.uiCss(r) +
+        this.profile.docCss(r);
     }
-    if (this.docSpec && this.doc) css += this.profile.docCss(this.doc.roles);
     // Order doesn't matter for these: per-sheet overrides sit right after their source sheet and
     // inline/document rules are !important.
     this.base ??= this.ownStyle('base');
@@ -197,6 +196,9 @@ export class PageThemer {
         }
       });
     }
+    // The cursor moving between styles changes the page color without touching the indicator.
+    const ind = this.profile.docColorControls && document.querySelector(this.profile.docColorControls.textIndicator);
+    if (ind) this.pending.add(ind);
     this.flushInline();
   }
 
@@ -229,7 +231,7 @@ export class PageThemer {
       }
       rules = parsed.cssRules;
     }
-    const extracted = extractColorRules(rules, this.profile.docRuleHints);
+    const extracted = extractColorRules(rules);
     const prev = this.sources.get(node);
     const src: SheetSource = { rules: extracted, override: prev?.override ?? this.ownStyle('sheet') };
     this.sources.set(node, src);
@@ -237,7 +239,7 @@ export class PageThemer {
   }
 
   private writeOverride(node: Element, src: SheetSource) {
-    src.override.textContent = renderRules(src.rules, this.ui, this.doc, !!this.uiRoles?.isDark);
+    src.override.textContent = this.mapper ? renderRules(src.rules, this.mapper, !!this.roles?.isDark) : '';
     if (src.override.previousElementSibling !== node) node.after(src.override);
   }
 
@@ -245,7 +247,7 @@ export class PageThemer {
   // Inline colors (style="", fill="", stroke="") → shared attribute rules, never touching style
 
   private rescanInline() {
-    document.querySelectorAll('[style], [fill], [stroke], [data-wd-bg], [data-wd-fg], [data-wd-bc], [data-wd-fill], [data-wd-stroke]')
+    document.querySelectorAll(['[style]', '[fill]', '[stroke]', ...INLINE_ATTRS.map((a) => `[${a}]`)].join(','))
       .forEach((el) => this.pending.add(el));
     this.flushInline();
   }
@@ -259,15 +261,14 @@ export class PageThemer {
 
   private applyInline(el: Element) {
     if (!el.isConnected || el.id === PANEL_HOST_ID) return;
+    const m = this.mapper;
     const inDoc = !!this.profile.docRegion && !!el.closest(this.profile.docRegion);
-    // Swatches and color indicators preview document colors → document theme (or true colors
-    // when no document theme is on).
+    // Swatches and color indicators preview document colors, mapped like the page would map them.
     const control = this.colorControlKind(el);
     const keep = !control && !!el.closest(this.profile.keepColors);
     const style = (el as HTMLElement).style as CSSStyleDeclaration | undefined;
     for (const [read, attr, baseKind, prop] of INLINE) {
       const useControl = control && read !== 'color';
-      const m = useControl || inDoc ? this.doc : this.ui;
       const kind = useControl ? control : read === 'fill' || read === 'stroke' ? svgKind(el, inDoc, baseKind) : baseKind;
       let v = style?.getPropertyValue(read) ?? '';
       if (!v && (read === 'fill' || read === 'stroke')) v = el.getAttribute(read) ?? '';
@@ -276,15 +277,45 @@ export class PageThemer {
         if (el.hasAttribute(attr)) el.removeAttribute(attr);
         continue;
       }
-      const mapped = m.mapRGBA(c, kind);
-      const key = hex8(mapped);
-      const rule = `${attr}="${key}"`;
-      if (!this.inlineRules.has(rule)) {
-        this.inlineRules.add(rule);
-        this.inlineSheet!.sheet?.insertRule(`[${rule}]{${prop}:${formatColor(mapped)} !important}`, this.inlineSheet!.sheet.cssRules.length);
+      if (useControl && kind === 'text' && el.matches(this.profile.docColorControls!.textIndicator)) {
+        // The page may color this text by paragraph style or size: ask the hook what it paints.
+        this.queryIndicator(el, attr, prop, v);
+        continue;
       }
-      if (el.getAttribute(attr) !== key) el.setAttribute(attr, key);
+      this.setInline(el, attr, prop, m.mapRGBA(c, kind));
     }
+  }
+
+  private setInline(el: Element, attr: string, prop: string, color: RGBA) {
+    const key = hex8(color);
+    const rule = `${attr}="${key}"`;
+    if (!this.inlineRules.has(rule)) {
+      this.inlineRules.add(rule);
+      this.inlineSheet!.sheet?.insertRule(`[${rule}]{${prop}:${formatColor(color)} !important}`, this.inlineSheet!.sheet.cssRules.length);
+    }
+    if (el.getAttribute(attr) !== key) el.setAttribute(attr, key);
+  }
+
+  private querySeq = 0;
+
+  /** Text-color indicator: same color the canvas hook paints for the text under the cursor. */
+  private queryIndicator(el: Element, attr: string, prop: string, raw: string) {
+    const c = this.profile.docColorControls!;
+    const pt = parseFloat((document.querySelector(c.fontSize) as HTMLInputElement | null)?.value ?? '') || 11;
+    const zoom = (parseFloat((document.querySelector(c.zoom) as HTMLInputElement | null)?.value ?? '') || 100) / 100;
+    const q: TextColorQuery = {
+      id: ++this.querySeq, color: raw, px: (pt * 4) / 3 * zoom,
+      style: document.querySelector(c.paragraphStyle)?.textContent ?? '',
+    };
+    const onAnswer = (e: Event) => {
+      const a = JSON.parse(String((e as CustomEvent).detail)) as { id: number; color: string | null };
+      if (a.id !== q.id) return;
+      window.removeEventListener(ANSWER_EVENT, onAnswer);
+      const color = a.color ? parseColor(a.color) : null;
+      if (color && this.mapper) this.setInline(el, attr, prop, color);
+    };
+    window.addEventListener(ANSWER_EVENT, onAnswer);
+    window.dispatchEvent(new CustomEvent(QUERY_EVENT, { detail: JSON.stringify(q) }));
   }
 
   // ----------------------------------------------------------------------------------------

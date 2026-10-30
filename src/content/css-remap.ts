@@ -23,8 +23,6 @@ export interface ColorRule {
   decls: ColorDecl[];
   /** Background-image icon that needs the icon filter on dark UI themes. */
   icon: boolean;
-  /** Styles the document surface (themed by the document theme, never the UI theme). */
-  doc: boolean;
 }
 
 const TEXT_PROPS = new Set([
@@ -125,12 +123,12 @@ type RuleLike = CSSRule & {
 };
 
 /** Walks a rule list and returns only the rules that set colors. */
-export function extractColorRules(rules: CSSRuleList, docHints: string[], wrappers: string[] = []): ColorRule[] {
+export function extractColorRules(rules: CSSRuleList, wrappers: string[] = []): ColorRule[] {
   const out: ColorRule[] = [];
   for (let i = 0; i < rules.length; i++) {
     const rule = rules[i] as RuleLike;
     if (rule.selectorText !== undefined && rule.style) {
-      const r = extractStyleRule(rule.selectorText, rule.style, docHints, wrappers);
+      const r = extractStyleRule(rule.selectorText, rule.style, wrappers);
       if (r) out.push(r);
       // CSS nesting: nested rules inherit the selector context, which we can't replicate simply.
     } else if (rule.cssRules) {
@@ -138,10 +136,10 @@ export function extractColorRules(rules: CSSRuleList, docHints: string[], wrappe
       if (rule.media) prelude = `@media ${rule.media.mediaText}`;
       else if (rule.conditionText !== undefined) prelude = `@supports ${rule.conditionText}`;
       else if (rule.name !== undefined && rule.constructor?.name?.includes('Layer')) prelude = `@layer ${rule.name}`;
-      if (prelude) out.push(...extractColorRules(rule.cssRules, docHints, [...wrappers, prelude]));
+      if (prelude) out.push(...extractColorRules(rule.cssRules, [...wrappers, prelude]));
     } else if (rule.styleSheet) {
       try {
-        out.push(...extractColorRules(rule.styleSheet.cssRules, docHints, wrappers));
+        out.push(...extractColorRules(rule.styleSheet.cssRules, wrappers));
       } catch {
         // cross-origin @import: skipped
       }
@@ -177,7 +175,7 @@ function isGlyphIcon(selector: string, url: string): boolean {
  * `transparent` or `var(--x)`: the override sheet must reproduce the source's cascade order,
  * otherwise a remapped early rule would beat a later `background: inherit` in the same sheet.
  */
-export function extractStyleRule(selector: string, style: CSSStyleDeclaration, docHints: string[], wrappers: string[]): ColorRule | null {
+export function extractStyleRule(selector: string, style: CSSStyleDeclaration, wrappers: string[] = []): ColorRule | null {
   const decls: ColorDecl[] = [];
   let imageUrl: string | undefined;
   let strongBg = false;
@@ -218,21 +216,19 @@ export function extractStyleRule(selector: string, style: CSSStyleDeclaration, d
   if (strongBg) for (const d of decls) if (d.prop === 'color' && isLight(d.value)) d.kind = 'onAccent';
   const icon = !!imageUrl && isGlyphIcon(selector, imageUrl);
   if (!icon && !decls.length) return null;
-  return { wrappers, selector, decls, icon, doc: docHints.some((h) => selector.includes(h)) };
+  return { wrappers, selector, decls, icon };
 }
 
-/** Renders override CSS for extracted rules. Rules for the document surface use `doc`. */
-export function renderRules(rules: ColorRule[], ui: Mapper | null, doc: Mapper | null, iconFilter: boolean): string {
+/** Renders override CSS for extracted rules. */
+export function renderRules(rules: ColorRule[], m: Mapper, iconFilter: boolean): string {
   let css = '';
   for (const r of rules) {
-    const m = r.doc ? doc : ui;
-    if (!m) continue;
     let body = '';
     for (const d of r.decls) {
       const v = d.triple ? remapTriple(d.value, d.kind, m) : remapValue(d.value, d.kind, m);
       body += `${d.prop}:${v}${d.important ? ' !important' : ''};`;
     }
-    if (r.icon && iconFilter && !r.doc) body += 'filter:var(--wd-icon-filter) !important;';
+    if (r.icon && iconFilter) body += 'filter:var(--wd-icon-filter) !important;';
     if (!body) continue;
     let text = `${r.selector}{${body}}`;
     for (let i = r.wrappers.length - 1; i >= 0; i--) text = `${r.wrappers[i]}{${text}}`;

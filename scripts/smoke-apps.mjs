@@ -41,13 +41,12 @@ try {
     await driver.sleep(7000);
     await shot(`app-${app}-0-default`);
     if (!imported) {
-      await bridge({ wdTest: 'import', url: 'https://github.com/tinted-theming/schemes/blob/spec-0.11/base16/nord.yaml' });
       await bridge({ wdTest: 'import', url: 'https://github.com/tinted-theming/schemes/blob/spec-0.11/base16/gruvbox-dark.yaml' });
       imported = true;
     }
-    await bridge({ wdTest: 'set', ui: 'base16-nord', doc: 'base16-gruvbox-dark' });
+    await bridge({ wdTest: 'set', theme: 'base16-gruvbox-dark' });
     await driver.sleep(3000);
-    await shot(`app-${app}-1-nord-ui-gruvbox-doc`);
+    await shot(`app-${app}-1-gruvbox`);
     // the choice is remembered for this page: reload to see first-paint theming
     await driver.navigate().refresh();
     await driver.sleep(8000);

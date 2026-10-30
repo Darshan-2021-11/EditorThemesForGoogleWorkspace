@@ -30,11 +30,27 @@ function cache(): Promise<Cache> {
     return {
       schemes: new Map(schemes.map((s) => [s.id, s])),
       options: new Map(options.map(({ id, ...o }) => [id, o])),
-      pages: new Map(pages.map((p) => [p.key, p])),
-      settings: { ...DEFAULT_SETTINGS, ...settings },
+      pages: new Map(pages.map((p) => [p.key, migratePage(p)])),
+      settings: migrateSettings(settings),
     };
   })();
   return cachePromise;
+}
+
+/** Earlier versions stored separate interface/document themes; keep the document one. */
+type Legacy = { ui?: string | null; doc?: string | null; defaultUi?: string | null; defaultDoc?: string | null; lastUi?: string | null; lastDoc?: string | null };
+
+function migratePage(p: PageSetting & Legacy): PageSetting {
+  return { key: p.key, theme: p.theme !== undefined ? p.theme : p.doc ?? p.ui ?? null, updated: p.updated };
+}
+
+function migrateSettings(s: (GlobalSettings & Legacy) | undefined): GlobalSettings {
+  return {
+    ...DEFAULT_SETTINGS,
+    autoApply: s?.autoApply ?? false,
+    defaultTheme: s?.defaultTheme ?? s?.defaultDoc ?? s?.defaultUi ?? null,
+    lastTheme: s?.lastTheme ?? s?.lastDoc ?? s?.lastUi ?? null,
+  };
 }
 
 requestPersistence();
@@ -48,24 +64,22 @@ function spec(c: Cache, id: string | null): ThemeSpec | null {
   return { scheme, options: { ...DEFAULT_OPTIONS, ...c.options.get(scheme.id) } };
 }
 
-/** The scheme ids in effect for a page: remembered choice, else defaults when auto-apply is on. */
-function effective(c: Cache, key: string): { ui: string | null; doc: string | null } {
+/** The scheme id in effect for a page: remembered choice, else the default when auto-apply is on. */
+function effective(c: Cache, key: string): string | null {
   const p = c.pages.get(key);
-  if (p) return { ui: p.ui, doc: p.doc };
-  if (c.settings.autoApply) return { ui: c.settings.defaultUi, doc: c.settings.defaultDoc };
-  return { ui: null, doc: null };
+  if (p) return p.theme;
+  return c.settings.autoApply ? c.settings.defaultTheme : null;
 }
 
 export async function resolvePage(url: string): Promise<PageState> {
   const c = await cache();
   const key = pageKey(url);
-  const e = effective(c, key);
-  return { key, ui: spec(c, e.ui), doc: spec(c, e.doc), hasSchemes: c.schemes.size > 0 };
+  return { key, theme: spec(c, effective(c, key)), hasSchemes: c.schemes.size > 0 };
 }
 
-async function savePage(key: string, ui: string | null, doc: string | null) {
+async function savePage(key: string, theme: string | null) {
   const c = await cache();
-  const rec: PageSetting = { key, ui, doc, updated: Date.now() };
+  const rec: PageSetting = { key, theme, updated: Date.now() };
   c.pages.set(key, rec);
   await db.put('pages', rec);
 }
@@ -116,23 +130,11 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
     return resolvePage(sender.tab!.url!);
   },
 
-  async setPageThemes(req, sender) {
+  async setPageTheme(req, sender) {
     const c = await cache();
     const key = pageKey(sender.tab!.url!);
-    const cur = effective(c, key);
-    const ui = req.ui === undefined ? cur.ui : req.ui;
-    const doc = req.doc === undefined ? cur.doc : req.doc;
-    await savePage(key, ui, doc);
-    const patch: Partial<GlobalSettings> = {};
-    if (req.ui) {
-      patch.lastUi = req.ui;
-      if (!c.settings.defaultUi) patch.defaultUi = req.ui;
-    }
-    if (req.doc) {
-      patch.lastDoc = req.doc;
-      if (!c.settings.defaultDoc) patch.defaultDoc = req.doc;
-    }
-    if (Object.keys(patch).length) await saveSettings(patch);
+    await savePage(key, req.theme);
+    if (req.theme) await saveSettings({ lastTheme: req.theme, defaultTheme: c.settings.defaultTheme ?? req.theme });
     await broadcastState(key);
     return resolvePage(sender.tab!.url!);
   },
@@ -225,6 +227,7 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
     await db.putMany('schemes', d.schemes ?? []);
     await db.putMany('options', d.options ?? []);
     await db.putMany('pages', d.pages ?? []);
+    // older backups (separate interface/document themes) are migrated when the cache reloads
     if (d.settings) await db.put('settings', { ...DEFAULT_SETTINGS, ...d.settings, id: 'global' });
     cachePromise = null;
     await broadcast({ type: 'schemesChanged' });
@@ -250,11 +253,10 @@ async function togglePage(url: string, tabId: number): Promise<PageState> {
   const cur = effective(c, key);
   if (!c.schemes.size) {
     push(tabId, { type: 'togglePanel', tab: 'library' }, 0);
-  } else if (cur.ui || cur.doc) {
-    await savePage(key, null, null);
+  } else if (cur) {
+    await savePage(key, null);
   } else {
-    const fallback = firstScheme(c);
-    await savePage(key, c.settings.lastUi ?? c.settings.defaultUi ?? fallback, c.settings.lastDoc ?? c.settings.defaultDoc ?? fallback);
+    await savePage(key, c.settings.lastTheme ?? c.settings.defaultTheme ?? firstScheme(c));
   }
   await broadcastState(key);
   return resolvePage(url);

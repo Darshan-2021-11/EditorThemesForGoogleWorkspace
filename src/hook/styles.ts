@@ -81,6 +81,15 @@ export function sizeTier(px: number, bodyPx: number): StyleKey | null {
   return r >= 1.9 ? 'title' : r >= 1.45 ? 'h1' : r >= 1.22 ? 'h2' : null;
 }
 
+/** Maps the toolbar's paragraph style name to a style key (English UI names). */
+export function styleFromName(name: string): StyleKey | null {
+  const n = name.trim().toLowerCase();
+  if (n === 'title') return 'title';
+  if (n === 'subtitle') return 'subtitle';
+  const h = /^heading ([1-6])$/.exec(n);
+  return h ? (`h${h[1]}` as StyleKey) : null;
+}
+
 /** Learns font → style from matched runs; majority vote guards against shared fonts. */
 export class StyleLearner {
   private votes = new Map<string, Map<StyleKey, number>>();
@@ -114,6 +123,11 @@ export class StyleLearner {
       if (this.bodyPx !== prev) this.onChange?.();
     }
     return sizeTier(px, this.bodyPx);
+  }
+
+  /** Size-based style for text of `px` that has no recognised paragraph style. */
+  tierFor(px: number): StyleKey | null {
+    return this.totalBody < 300 ? null : sizeTier(px, this.bodyPx);
   }
 
   private learned(font: string, text: string): StyleKey | null {

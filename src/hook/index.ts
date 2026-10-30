@@ -5,8 +5,8 @@ import { ensureContrast, formatColor, parseColor } from '../theme/color';
 import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles } from '../theme/roles';
 import { STYLE_KEYS, type ColorKind, type StyleKey, type ThemeSpec } from '../theme/types';
-import { CONFIG_EVENT, READY_EVENT } from '../shared/hook-protocol';
-import { buildIndex, parseExportHtml, StyleLearner } from './styles';
+import { ANSWER_EVENT, CONFIG_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
+import { buildIndex, parseExportHtml, StyleLearner, styleFromName } from './styles';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 type Style = string | CanvasGradient | CanvasPattern;
@@ -284,6 +284,30 @@ function scheduleRepaint() {
     repaint();
   }, 250);
 }
+
+/** The color painted for text with this raw color, size and paragraph style (mirrors prepFill). */
+function resolveTextColor(q: TextColorQuery): string | null {
+  if (!mapper) return null;
+  const fill = parseColor(q.color) ? formatColor(parseColor(q.color)!) : q.color;
+  if (styleColors) {
+    if (LINK_COLORS.has(fill)) return styleColors.link;
+    const s = styleFromName(q.style) ?? learner?.tierFor(q.px);
+    if (s) return styleColors[s];
+    if (isInk(fill)) return styleColors.normal;
+  }
+  return mapper.map(fill, 'text');
+}
+
+window.addEventListener(QUERY_EVENT, (e) => {
+  const detail = (e as CustomEvent).detail;
+  if (typeof detail !== 'string') return;
+  try {
+    const q = JSON.parse(detail) as TextColorQuery;
+    window.dispatchEvent(new CustomEvent(ANSWER_EVENT, { detail: JSON.stringify({ id: q.id, color: resolveTextColor(q) }) }));
+  } catch {
+    // ignore malformed query
+  }
+});
 
 window.addEventListener(CONFIG_EVENT, (e) => {
   const detail = (e as CustomEvent).detail;

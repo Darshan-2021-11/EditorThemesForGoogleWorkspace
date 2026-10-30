@@ -2,31 +2,27 @@ import type { Scheme, ThemeOptions, ThemeSpec } from '../theme/types';
 
 export interface GlobalSettings {
   id: 'global';
-  /** Apply the default themes to every Google page without a remembered choice. */
+  /** Apply the default theme to every Google page without a remembered choice. */
   autoApply: boolean;
-  defaultUi: string | null;
-  defaultDoc: string | null;
-  /** Most recently picked themes; used by the on/off shortcut. */
-  lastUi: string | null;
-  lastDoc: string | null;
+  defaultTheme: string | null;
+  /** Most recently picked theme; used by the on/off shortcut. */
+  lastTheme: string | null;
 }
 
 export const DEFAULT_SETTINGS: GlobalSettings = {
-  id: 'global', autoApply: false, defaultUi: null, defaultDoc: null, lastUi: null, lastDoc: null,
+  id: 'global', autoApply: false, defaultTheme: null, lastTheme: null,
 };
 
-/** Remembered theme choice for one page (null = theme off). */
+/** Remembered theme choice for one page (null = theme off). One theme covers UI and document. */
 export interface PageSetting {
   key: string;
-  ui: string | null;
-  doc: string | null;
+  theme: string | null;
   updated: number;
 }
 
 export interface PageState {
   key: string;
-  ui: ThemeSpec | null;
-  doc: ThemeSpec | null;
+  theme: ThemeSpec | null;
   /** False until the user has imported at least one scheme. */
   hasSchemes: boolean;
 }
@@ -48,7 +44,7 @@ export interface BackupFile {
 /** content/panel → background */
 export type Request =
   | { type: 'getPageState' }
-  | { type: 'setPageThemes'; ui?: string | null; doc?: string | null }
+  | { type: 'setPageTheme'; theme: string | null }
   | { type: 'togglePage' }
   | { type: 'listSchemes' }
   | { type: 'importSchemes'; url: string }
@@ -64,7 +60,7 @@ export type Request =
 
 export interface ResponseMap {
   getPageState: PageState;
-  setPageThemes: PageState;
+  setPageTheme: PageState;
   togglePage: PageState;
   listSchemes: Scheme[];
   importSchemes: { imported: number; names: string[] };
@@ -86,7 +82,7 @@ export type Push =
   | { type: 'importProgress'; done: number; total: number }
   | { type: 'schemesChanged' };
 
-export type PanelTab = 'ui' | 'doc' | 'library' | 'custom' | 'settings';
+export type PanelTab = 'theme' | 'library' | 'custom' | 'settings';
 
 export async function send<T extends Request>(req: T): Promise<ResponseMap[T['type']]> {
   const res = await browser.runtime.sendMessage(req);
