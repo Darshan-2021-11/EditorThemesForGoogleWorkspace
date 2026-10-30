@@ -52,9 +52,44 @@ export class PageThemer {
   private inlineRules = new Set<string>();
   private observer: MutationObserver | null = null;
 
+  /** Whether the open color palette belongs to the text-color or the highlight button. */
+  private paletteKind: ColorKind = 'text';
+
   constructor(private profile: AppProfile) {
     // The hook may load after our first config; re-send when it announces itself.
     window.addEventListener(READY_EVENT, () => this.sendHookConfig());
+    if (profile.docColorControls) {
+      const note = (e: Event) => this.noteColorButton(e.target);
+      document.addEventListener('pointerdown', note, true);
+      document.addEventListener('keydown', note, true);
+    }
+  }
+
+  private noteColorButton(target: EventTarget | null) {
+    const c = this.profile.docColorControls!;
+    const el = target instanceof Element ? target : null;
+    const kind: ColorKind | null = el?.closest(c.text) ? 'text' : el?.closest(c.fill) ? 'fill' : null;
+    if (!kind || !this.active) return;
+    this.paletteKind = kind;
+    // Palettes are built or re-shown right after the click; re-evaluate their swatches.
+    const rescan = () => {
+      document.querySelectorAll(c.palettes).forEach((p) => {
+        p.querySelectorAll('[style], [fill]').forEach((s) => this.pending.add(s));
+      });
+      this.flushInline();
+    };
+    setTimeout(rescan, 0);
+    setTimeout(rescan, 200);
+  }
+
+  /** Kind to use for an element that displays a document color, or null for ordinary UI. */
+  private colorControlKind(el: Element): ColorKind | null {
+    const c = this.profile.docColorControls;
+    if (!c) return null;
+    if (el.closest(c.text)) return 'text';
+    if (el.closest(c.fill)) return 'fill';
+    if (el.closest(c.palettes)) return this.paletteKind;
+    return null;
   }
 
   get active() {
@@ -225,11 +260,15 @@ export class PageThemer {
   private applyInline(el: Element) {
     if (!el.isConnected || el.id === PANEL_HOST_ID) return;
     const inDoc = !!this.profile.docRegion && !!el.closest(this.profile.docRegion);
-    const m = inDoc ? this.doc : this.ui;
-    const keep = !!el.closest(this.profile.keepColors);
+    // Swatches and color indicators preview document colors → document theme (or true colors
+    // when no document theme is on).
+    const control = this.colorControlKind(el);
+    const keep = !control && !!el.closest(this.profile.keepColors);
     const style = (el as HTMLElement).style as CSSStyleDeclaration | undefined;
     for (const [read, attr, baseKind, prop] of INLINE) {
-      const kind = read === 'fill' || read === 'stroke' ? svgKind(el, inDoc, baseKind) : baseKind;
+      const useControl = control && read !== 'color';
+      const m = useControl || inDoc ? this.doc : this.ui;
+      const kind = useControl ? control : read === 'fill' || read === 'stroke' ? svgKind(el, inDoc, baseKind) : baseKind;
       let v = style?.getPropertyValue(read) ?? '';
       if (!v && (read === 'fill' || read === 'stroke')) v = el.getAttribute(read) ?? '';
       const c = m && !keep && v ? parseColor(v) : null;

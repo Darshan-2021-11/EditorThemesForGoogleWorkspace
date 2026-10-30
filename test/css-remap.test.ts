@@ -46,6 +46,12 @@ describe('css remapping', () => {
     expect(v.decls[0].kind).toBe('onAccent');
   });
 
+  it('text painted in a surface variable stays matched to the surface (Docs title input)', () => {
+    const r = extractStyleRule('.docs-title-input', style({ color: 'var(--gm3-sys-color-surface-container-low,#f8fafd)' }), [], [])!;
+    expect(r.decls[0].kind).toBe('fill');
+    expect(renderRules([r], m, null, false)).not.toContain(nord.palette.base05);
+  });
+
   it('marks grey sprite icons (also via ::before content) but not branding', () => {
     expect(extractStyleRule('.docs-icon-img::before', style({ content: 'url("x/material_sprite_grey_medium.svg")' }), [], [])!.icon).toBe(true);
     expect(extractStyleRule('.docs-branding-icon-img::before', style({ content: 'url("x/branding_sprite1.svg")' }), [], [])).toBeNull();

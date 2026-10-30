@@ -11,8 +11,13 @@ export interface AppProfile {
   docRuleHints: string[];
   /** Whether document content is painted on <canvas> (handled by the hook). */
   canvasDoc: boolean;
-  /** Elements whose inline colors must stay true (color pickers). */
+  /** Elements whose inline colors must stay true (color pickers outside the document's controls). */
   keepColors: string;
+  /**
+   * Controls that show document colors (toolbar color indicators, color palettes). They use the
+   * document theme so a swatch looks exactly like the result on the page.
+   */
+  docColorControls?: { text: string; fill: string; palettes: string };
   /** CSS for the document surface while a document theme is on. */
   docCss(r: Roles): string;
   /** Extra UI CSS while a UI theme is on. */
@@ -29,6 +34,11 @@ const docs: AppProfile = {
   docRuleHints: ['kix-page', 'kix-lineview', 'kix-canvas-tile', 'kix-wordhtmlgenerator', 'kix-paginateddocumentplugin'],
   canvasDoc: true,
   keepColors: KEEP_COLORS,
+  docColorControls: {
+    text: '.docs-textcolormenubutton, #textColorButton, [aria-label^="Text colo"]',
+    fill: '#bgColorButton, .docs-highlightcolormenubutton, [aria-label^="Highlight colo"]',
+    palettes: '.docs-colormenuitems, .docs-material-colorpalette, .docs-customcolorpalette, .goog-palette, .jfk-palette',
+  },
   docCss: (r) => `
     .kix-page-paginated, .kix-page-compact, .kix-page, .kix-page-content-wrapper,
     .kix-paginateddocumentplugin .kix-page { background-color: ${hex(r.bg)} !important; }

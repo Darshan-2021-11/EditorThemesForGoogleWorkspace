@@ -205,7 +205,12 @@ export function extractStyleRule(selector: string, style: CSSStyleDeclaration, d
       continue;
     }
     const varName = /^var\(\s*(--[\w-]+)/.exec(value)?.[1];
-    if (kind === 'text' && varName && kindForVariable(varName, '#ffffff') === 'onAccent') kind = 'onAccent';
+    if (kind === 'text' && varName) {
+      const vk = kindForVariable(varName, '#ffffff');
+      // Text painted in a surface color is deliberately invisible (e.g. Docs' title <input>,
+      // whose visible text is a separate label): keep it matching the surface.
+      if (vk === 'onAccent' || vk === 'fill') kind = vk;
+    }
     if (prop === 'background-color' && isStrongChromatic(value)) strongBg = true;
     decls.push({ prop, value, kind, important: style.getPropertyPriority(prop) === 'important' });
   }
