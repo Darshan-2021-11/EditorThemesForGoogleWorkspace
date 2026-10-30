@@ -1,6 +1,6 @@
 # Workspace Dark
 
-A Firefox extension that applies code-editor themes (Base16/Base24: Nord, Monokai, Dracula, One Dark, Solarized, GitHub, Gruvbox, and others) to Google Docs, Sheets, Slides, Forms and Drive. It themes both the **Google interface** and the **document itself**, with a separate theme for each.
+A Firefox extension that applies code-editor themes (Base16/Base24: Nord, Monokai, Dracula, One Dark, Solarized, GitHub, Gruvbox, and others) to Google Docs, Sheets, Slides, Forms and Drive. One theme covers both the **Google interface** and the **document itself**, across every app.
 
 - **Real theme colors, not inversion.** The document canvas is recolored as Docs draws it, and Google's own stylesheets are rewritten through the theme. Images keep their real colors.
 - **WYSIWYG printing.** Ctrl+P / File → Print prints the themed document exactly as it looks on screen.
@@ -23,7 +23,7 @@ Then use one of these:
 
 1. Open any Google Doc and click the toolbar button (or press **Alt+Shift+T**) to open the panel.
 2. **Get themes**: import a suggestion or paste a GitHub link.
-3. **Interface** / **Document**: pick a theme for each. Hover a theme to preview it live and click to apply. Per-theme options:
+3. **Theme**: hover a theme to preview it live on the interface and the document, and click to apply. Per-theme options:
    - *Snap to theme* (red text → the theme's red) or *Keep hue* (original hues, fixed for contrast)
    - *Editor-style accents* (headings, links and code in theme accents)
    - *Dim images*
