@@ -3,6 +3,7 @@ import { send, type GlobalSettings, type PageState, type PanelTab } from '../sha
 import { formatColor, type RGBA } from '../theme/color';
 import { schemeToRoles } from '../theme/roles';
 import { SUGGESTED_SOURCES } from '../theme/scheme-import';
+import { styleColors } from '../theme/style-colors';
 import {
   BASE16_KEYS, BASE24_EXTRA_KEYS, DEFAULT_OPTIONS, DEFAULT_STYLE_SLOTS, STYLE_KEYS, STYLE_LABELS,
   type Scheme, type ThemeOptions, type ThemeSpec,
@@ -293,10 +294,12 @@ export class Panel {
   private renderStyleSlots(current: ThemeSpec, save: (slots: ThemeOptions['styleSlots']) => void): Node {
     const p = current.scheme.palette;
     const slots = { ...DEFAULT_STYLE_SLOTS, ...current.options.styleSlots };
+    // the exact colors the page paints with (same function as the canvas hook)
+    const shown = styleColors({ ...current, options: { ...current.options, styleSlots: slots } });
     return h('div', { class: 'styles' },
       STYLE_KEYS.map((k) =>
         h('div', { class: 'style-row' },
-          h('span', { class: 'style-name', style: `color:${p[slots[k]]}` }, STYLE_LABELS[k]),
+          h('span', { class: 'style-name', style: `color:${shown[k]}` }, STYLE_LABELS[k]),
           h('span', { class: 'dots' },
             STYLE_SLOT_CHOICES.filter((s) => p[s]).map((s) =>
               h('button', {

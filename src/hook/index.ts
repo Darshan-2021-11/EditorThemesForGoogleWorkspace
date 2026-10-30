@@ -1,10 +1,11 @@
 // Runs in the page's own JS world at document_start, before Google's scripts.
 // Docs/Sheets paint document content on <canvas>; we remap colors at draw time so the canvas
 // shows theme colors directly (no inversion filters). While inactive every call passes through.
-import { ensureContrast, formatColor, parseColor } from '../theme/color';
+import { formatColor, parseColor } from '../theme/color';
 import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles } from '../theme/roles';
-import { STYLE_KEYS, type ColorKind, type StyleKey, type ThemeSpec } from '../theme/types';
+import { styleColors as computeStyleColors } from '../theme/style-colors';
+import type { ColorKind, StyleKey, ThemeSpec } from '../theme/types';
 import { ANSWER_EVENT, CONFIG_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
 import { buildIndex, parseExportHtml, StyleLearner, styleFromName } from './styles';
 
@@ -249,13 +250,7 @@ function configure(spec: ThemeSpec | null) {
     const roles = schemeToRoles(spec.scheme);
     mapper = createMapper(roles, spec.options);
     if (spec.options.styleColors) {
-      // Exact palette colors; only nudged if a theme's accent is unreadable on its background
-      // (3:1 is enough for large heading text; body text gets 4.5:1).
-      const pick = (k: StyleKey) => {
-        const c = parseColor(spec.scheme.palette[spec.options.styleSlots[k]] ?? '') ?? roles.fg;
-        return formatColor({ ...ensureContrast(c, roles.bg, k === 'normal' || k === 'link' || k === 'code' ? 4.5 : 3), a: 1 });
-      };
-      styleColors = Object.fromEntries(STYLE_KEYS.map((k) => [k, pick(k)])) as Record<StyleKey, string>;
+      styleColors = computeStyleColors(spec);
       loadParagraphIndex();
     }
   }

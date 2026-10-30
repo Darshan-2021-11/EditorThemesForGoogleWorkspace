@@ -41,15 +41,22 @@ export function parseExportHtml(html: string): { tag: string; className: string;
   return out;
 }
 
+/** Text → every style a paragraph with that text has (the same text can be a Heading 2 and a Heading 3). */
 export interface ParagraphIndex {
-  full: Map<string, StyleKey>;
-  prefix: Map<string, StyleKey>;
+  full: Map<string, StyleKey[]>;
+  prefix: Map<string, StyleKey[]>;
+}
+
+function add(map: Map<string, StyleKey[]>, key: string, style: StyleKey) {
+  const list = map.get(key);
+  if (!list) map.set(key, [style]);
+  else if (!list.includes(style)) list.push(style);
 }
 
 /** Paragraph styles from the export's markup: h1–h6, p.title, p.subtitle, everything else normal. */
 export function buildIndex(paragraphs: { tag: string; className: string; text: string }[]): ParagraphIndex {
-  const full = new Map<string, StyleKey>();
-  const prefix = new Map<string, StyleKey>();
+  const full = new Map<string, StyleKey[]>();
+  const prefix = new Map<string, StyleKey[]>();
   for (const p of paragraphs) {
     const text = normText(p.text);
     if (!text) continue;
@@ -57,13 +64,14 @@ export function buildIndex(paragraphs: { tag: string; className: string; text: s
     const style: StyleKey = /^h[1-6]$/.test(tag)
       ? (tag as StyleKey)
       : /\btitle\b/.test(p.className) ? 'title' : /\bsubtitle\b/.test(p.className) ? 'subtitle' : 'normal';
-    if (!full.has(text) || style !== 'normal') full.set(text, style);
-    if (text.length >= PREFIX && (!prefix.has(text.slice(0, PREFIX)) || style !== 'normal')) prefix.set(text.slice(0, PREFIX), style);
+    add(full, text, style);
+    if (text.length >= PREFIX) add(prefix, text.slice(0, PREFIX), style);
   }
   return { full, prefix };
 }
 
-export function lookup(index: ParagraphIndex, run: string): StyleKey | null {
+/** Candidate styles for a drawn run (several when the same text has different styles). */
+export function lookup(index: ParagraphIndex, run: string): StyleKey[] | null {
   const t = normText(run);
   if (t.length < 2) return null;
   return index.full.get(t) ?? (t.length >= PREFIX ? index.prefix.get(t.slice(0, PREFIX)) ?? null : null);
@@ -92,7 +100,7 @@ export function styleFromName(name: string): StyleKey | null {
 
 /** Learns font → style from matched runs; majority vote guards against shared fonts. */
 export class StyleLearner {
-  private votes = new Map<string, Map<StyleKey, number>>();
+  readonly votes = new Map<string, Map<StyleKey, number>>();
   private decided = new Map<string, StyleKey | null>();
   private lastAnswer = new Map<string, StyleKey | null>();
   private bodyChars = new Map<number, number>();
@@ -108,8 +116,14 @@ export class StyleLearner {
 
   /** Returns the heading/title style for a run in `font`, or null for body text. */
   classify(font: string, text: string): StyleKey | null {
-    const learned = this.learned(font, text);
+    const cands = lookup(this.index, text);
+    if (cands) this.vote(font, cands, normText(text).length);
+    // A run that is exactly one styled paragraph: that's its style, whatever its font.
+    if (cands?.length === 1 && cands[0] !== 'normal') return cands[0];
+    // Otherwise: what this font is used for in this document…
+    const learned = cands?.length === 1 ? null : this.decide(font);
     if (learned) return learned;
+    // …or, for body-styled / unknown text, how big it is.
     const px = pxOf(font);
     this.bodyChars.set(px, (this.bodyChars.get(px) ?? 0) + text.length);
     this.totalBody += text.length;
@@ -130,24 +144,45 @@ export class StyleLearner {
     return this.totalBody < 300 ? null : sizeTier(px, this.bodyPx);
   }
 
-  private learned(font: string, text: string): StyleKey | null {
-    const s = lookup(this.index, text);
-    if (s) {
-      let v = this.votes.get(font);
-      if (!v) this.votes.set(font, (v = new Map()));
-      v.set(s, (v.get(s) ?? 0) + Math.max(1, normText(text).length));
-      this.decided.delete(font);
-    }
+  /** Ambiguous matches split their weight between the candidate styles. */
+  private vote(font: string, cands: StyleKey[], len: number) {
+    let v = this.votes.get(font);
+    if (!v) this.votes.set(font, (v = new Map()));
+    const w = Math.max(1, len) / cands.length;
+    for (const s of cands) v.set(s, (v.get(s) ?? 0) + w);
+    this.decided.clear(); // one font's winner can settle another font's tie
+  }
+
+  /** The style a font clearly stands for (top vote well ahead of the next), if any. */
+  private static clearWinner(v: Map<StyleKey, number>): StyleKey | null {
+    const [a, b] = [...v].sort((x, y) => y[1] - x[1]);
+    return a && (!b || a[1] > b[1] * 1.15) ? a[0] : null;
+  }
+
+  private decide(font: string): StyleKey | null {
     let d = this.decided.get(font);
-    if (d === undefined) {
-      d = null;
-      let best = 0;
-      for (const [style, n] of this.votes.get(font) ?? []) if (n > best) { best = n; d = style; }
-      if (d === 'normal') d = null;
-      if (d !== (this.lastAnswer.get(font) ?? null)) this.onChange?.();
-      this.lastAnswer.set(font, d);
-      this.decided.set(font, d);
+    if (d !== undefined) return d;
+    d = null;
+    const v = this.votes.get(font);
+    if (v?.size) {
+      const sorted = [...v].sort((x, y) => y[1] - x[1]);
+      let tied = sorted.filter(([, n]) => n >= sorted[0][1] * 0.87).map(([s]) => s);
+      if (tied.length > 1) {
+        // e.g. "Lorem ipsum" is both a Heading 2 and a Heading 3: if another font clearly is the
+        // Heading 2, this one is the Heading 3.
+        const owned = new Set<StyleKey>();
+        for (const [f, other] of this.votes) {
+          const w = f !== font ? StyleLearner.clearWinner(other) : null;
+          if (w) owned.add(w);
+        }
+        const rest = tied.filter((s) => !owned.has(s));
+        if (rest.length) tied = rest;
+      }
+      d = tied[0] === 'normal' ? null : tied[0];
     }
+    if (d !== (this.lastAnswer.get(font) ?? null)) this.onChange?.();
+    this.lastAnswer.set(font, d);
+    this.decided.set(font, d);
     return d;
   }
 }

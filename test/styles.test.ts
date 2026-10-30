@@ -28,8 +28,8 @@ describe('paragraph style recognition', () => {
   });
 
   it('looks up whole paragraphs and long prefixes', () => {
-    expect(lookup(index, '‭Fabulous Features of Google Docs‬')).toBe('title');
-    expect(lookup(index, '‭Technology Integration Specialist, Goog')).toBe('normal');
+    expect(lookup(index, '‭Fabulous Features of Google Docs‬')).toEqual(['title']);
+    expect(lookup(index, '‭Technology Integration Specialist, Goog')).toEqual(['normal']);
     expect(lookup(index, 'Unknown text')).toBeNull();
   });
 
@@ -40,6 +40,29 @@ describe('paragraph style recognition', () => {
     expect(l.classify('300 24px docs-Lexend', '🧔 Presenter')).toBe('h1');
     expect(l.classify('300 16px docs-Lexend', 'Technology Integration Specialist, Google Certified Trainer and Innovator')).toBeNull();
     expect(l.classify('300 16px docs-Lexend', 'anything')).toBeNull();
+  });
+
+  it('a styled paragraph keeps its style even when it shares the body font (Subtitle)', () => {
+    const idx = buildIndex([
+      { tag: 'P', className: 'subtitle', text: 'September 04, 20XX' },
+      ...Array.from({ length: 5 }, (_, i) => ({ tag: 'P', className: '', text: `Body paragraph number ${i} with plenty of words in it` })),
+    ]);
+    const l = new StyleLearner(idx);
+    for (let i = 0; i < 5; i++) l.classify('400 14.6667px Roboto', `Body paragraph number ${i} with plenty of words in it`);
+    expect(l.classify('400 14.6667px Roboto', 'September 04, 20XX')).toBe('subtitle');
+  });
+
+  it('same text as Heading 2 and Heading 3: fonts are told apart by elimination', () => {
+    const idx = buildIndex([
+      { tag: 'H2', className: '', text: 'Lorem ipsum' },
+      { tag: 'H3', className: '', text: 'Lorem ipsum' },
+      { tag: 'H2', className: '', text: 'Dolor sit' },
+    ]);
+    const l = new StyleLearner(idx);
+    expect(l.classify('400 22px Roboto', 'Dolor sit')).toBe('h2');
+    l.classify('400 22px Roboto', 'Lorem ipsum');
+    expect(l.classify('700 16px Roboto', 'Lorem ipsum')).toBe('h3');
+    expect(l.classify('400 22px Roboto', 'Lorem ipsum')).toBe('h2');
   });
 
   it('enlarged plain text gets heading colors by size', () => {
