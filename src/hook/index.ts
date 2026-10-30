@@ -1,11 +1,12 @@
 // Runs in the page's own JS world at document_start, before Google's scripts.
 // Docs/Sheets paint document content on <canvas>; we remap colors at draw time so the canvas
 // shows theme colors directly (no inversion filters). While inactive every call passes through.
-import { ensureContrast, parseColor, toOklch } from '../theme/color';
+import { ensureContrast, formatColor, parseColor } from '../theme/color';
 import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles } from '../theme/roles';
-import type { ColorKind, ThemeSpec } from '../theme/types';
+import { STYLE_KEYS, type ColorKind, type StyleKey, type ThemeSpec } from '../theme/types';
 import { CONFIG_EVENT, READY_EVENT } from '../shared/hook-protocol';
+import { buildIndex, parseExportHtml, StyleLearner } from './styles';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 type Style = string | CanvasGradient | CanvasPattern;
@@ -20,40 +21,64 @@ interface CtxState {
 }
 
 let mapper: Mapper | null = null;
-let semanticColors: { heading: string; code: string } | null = null;
+/** Theme color per paragraph style, when "color by paragraph style" is on. */
+let styleColors: Record<StyleKey, string> | null = null;
+let learner: StyleLearner | null = null;
 const states = new WeakMap<object, CtxState>();
-const debug = { active: false, configs: 0, calls: {} as Record<string, number> };
+const debug = {
+  active: false, configs: 0, calls: {} as Record<string, number>,
+  fonts: {} as Record<string, number>, samples: {} as Record<string, string>,
+};
 if (__WD_DEV__) (window as unknown as { __wdHookDebug: typeof debug }).__wdHookDebug = debug;
 
 // ------------------------------------------------------------------------------------------
-// Semantic accents: classify text by font (headings by size relative to body text, code by family)
+// Paragraph-style colors
 
 const MONO_RE = /mono|courier|consolas|menlo|inconsolata|source code|fira code|cascadia|jetbrains/i;
-const sizeCounts = new Map<number, number>();
-let bodySize = 0;
-let sampleCount = 0;
+const LINK_COLORS = new Set(['#1155cc', '#0000ff', '#0000ee', '#1a0dab']);
 
-function classifyText(font: string, text: string): 'heading' | 'code' | null {
-  const m = /(\d+(?:\.\d+)?)px/.exec(font);
-  if (!m) return null;
-  if (MONO_RE.test(font.slice(m.index))) return 'code';
-  const size = Math.round(parseFloat(m[1]) * 2) / 2;
-  sizeCounts.set(size, (sizeCounts.get(size) ?? 0) + text.length);
-  if (++sampleCount % 200 === 1) {
-    let best = 0;
-    for (const [s, n] of sizeCounts) if (n > (sizeCounts.get(best) ?? 0)) best = s;
-    bodySize = best;
-  }
-  if (!bodySize) return null;
-  const bold = /\b(bold|bolder|[6-9]00)\b/.test(font.slice(0, m.index));
-  return size >= bodySize * 1.25 || (bold && size >= bodySize * 1.1) ? 'heading' : null;
+/** The style color for a run, or null to fall back to plain color mapping. */
+function styleColorFor(font: string, fill: string, text: string): string | null {
+  if (!styleColors) return null;
+  if (LINK_COLORS.has(fill)) return styleColors.link;
+  if (MONO_RE.test(font)) return styleColors.code;
+  const s = learner?.classify(font, text);
+  if (s) return styleColors[s];
+  return isInk(fill) ? styleColors.normal : null;
 }
 
-function isDefaultInk(css: string): boolean {
-  const c = parseColor(css);
-  if (!c) return false;
-  const [L, C] = toOklch(c);
-  return C < 0.02 && L < 0.5;
+const inkCache = new Map<string, boolean>();
+/** Default-looking text color (black / dark grey): body text that takes the "normal" color. */
+function isInk(css: string): boolean {
+  let v = inkCache.get(css);
+  if (v === undefined) {
+    const c = parseColor(css);
+    const L = c ? 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b : 255;
+    v = !!c && Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b) < 24 && L < 128;
+    inkCache.set(css, v);
+  }
+  return v;
+}
+
+/** Reads paragraph styles from the document's HTML export (read-only; Docs editor pages only). */
+let indexRequested = false;
+async function loadParagraphIndex() {
+  if (indexRequested) return;
+  indexRequested = true;
+  const id = /\/document\/(?:u\/\d+\/)?d\/([\w-]{10,})/.exec(location.pathname)?.[1];
+  if (__WD_DEV__) (debug as Record<string, unknown>).indexStart = { id, top: window === window.top };
+  if (!id || window !== window.top) return;
+  try {
+    const res = await fetch(`/document/d/${id}/export?format=html`, { credentials: 'include' });
+    if (__WD_DEV__) (debug as Record<string, unknown>).indexStatus = res.status;
+    if (!res.ok) return;
+    learner = new StyleLearner(buildIndex(parseExportHtml(await res.text())), scheduleRepaint);
+    if (__WD_DEV__) (debug as Record<string, unknown>).learner = learner;
+    repaint();
+  } catch (e) {
+    // export unavailable (e.g. downloads disabled): headings keep plain mapping
+    if (__WD_DEV__) (debug as Record<string, unknown>).indexError = String(e);
+  }
 }
 
 // ------------------------------------------------------------------------------------------
@@ -113,11 +138,7 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
     if (typeof s.fill !== 'string') return;
     let want = s.fill;
     if (mapper) {
-      want = mapper.map(s.fill, kind);
-      if (text !== undefined && semanticColors && isDefaultInk(s.fill)) {
-        const cls = classifyText(c.font, text);
-        if (cls) want = semanticColors[cls];
-      }
+      want = (text !== undefined && styleColorFor(c.font, s.fill, text)) || mapper.map(s.fill, kind);
     }
     if (want !== s.appliedFill) {
       fillD.set!.call(c, want);
@@ -142,7 +163,14 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
       configurable: true,
       writable: true,
       value: function (this: Ctx2D, ...args: unknown[]) {
-        if (__WD_DEV__) debug.calls[name as string] = (debug.calls[name as string] ?? 0) + 1;
+        if (__WD_DEV__) {
+          debug.calls[name as string] = (debug.calls[name as string] ?? 0) + 1;
+          if (name === 'fillText') {
+            const k = `${this.font} | ${String(this.fillStyle)} | scale=${(this as CanvasRenderingContext2D).getTransform?.().a}`;
+            debug.fonts[k] = (debug.fonts[k] ?? 0) + String(args[0]).length;
+            if (!debug.samples[k]) debug.samples[k] = String(args[0]).slice(0, 40);
+          }
+        }
         before(this, args);
         return orig.apply(this, args);
       },
@@ -215,24 +243,46 @@ CanvasGradient.prototype.addColorStop = function (offset: number, color: string)
 // Configuration from the content script (JSON string: Xray-safe across worlds)
 
 function configure(spec: ThemeSpec | null) {
-  if (!spec) {
-    mapper = null;
-    semanticColors = null;
-  } else {
+  mapper = null;
+  styleColors = null;
+  if (spec) {
     const roles = schemeToRoles(spec.scheme);
     mapper = createMapper(roles, spec.options);
-    const hex = (c: { r: number; g: number; b: number }) =>
-      '#' + [c.r, c.g, c.b].map((v) => Math.round(v).toString(16).padStart(2, '0')).join('');
-    semanticColors = spec.options.semantic
-      ? { heading: hex(ensureContrast(roles.heading, roles.bg, 4.5)), code: hex(ensureContrast(roles.code, roles.bg, 4.5)) }
-      : null;
+    if (spec.options.styleColors) {
+      // Exact palette colors; only nudged if a theme's accent is unreadable on its background
+      // (3:1 is enough for large heading text; body text gets 4.5:1).
+      const pick = (k: StyleKey) => {
+        const c = parseColor(spec.scheme.palette[spec.options.styleSlots[k]] ?? '') ?? roles.fg;
+        return formatColor({ ...ensureContrast(c, roles.bg, k === 'normal' || k === 'link' || k === 'code' ? 4.5 : 3), a: 1 });
+      };
+      styleColors = Object.fromEntries(STYLE_KEYS.map((k) => [k, pick(k)])) as Record<StyleKey, string>;
+      loadParagraphIndex();
+    }
   }
   debug.active = !!mapper;
   debug.configs++;
-  // Ask the app to repaint its canvases with the new colors. Docs re-renders its visible tiles
-  // on visibilitychange (resize/scroll/font events don't trigger a repaint).
+  repaint();
+}
+
+/**
+ * Asks the app to repaint its canvases. Docs re-renders its visible tiles on visibilitychange
+ * (resize/scroll/font events alone don't trigger a repaint).
+ */
+function repaint() {
   document.dispatchEvent(new Event('visibilitychange'));
   window.dispatchEvent(new Event('resize'));
+}
+
+/** Debounced repaint for when style recognition improves; capped so it can't loop. */
+let repaintTimer = 0;
+let learnedRepaints = 0;
+function scheduleRepaint() {
+  if (learnedRepaints >= 8) return;
+  clearTimeout(repaintTimer);
+  repaintTimer = window.setTimeout(() => {
+    learnedRepaints++;
+    repaint();
+  }, 250);
 }
 
 window.addEventListener(CONFIG_EVENT, (e) => {

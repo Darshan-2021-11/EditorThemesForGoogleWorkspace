@@ -18,11 +18,27 @@ export type ColorKind = 'text' | 'fill' | 'line' | 'onAccent';
 
 export type MappingMode = 'snap' | 'keep-hue';
 
+/** Paragraph styles (and inline roles) that can get their own theme color. */
+export const STYLE_KEYS = ['title', 'subtitle', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'normal', 'link', 'code'] as const;
+export type StyleKey = (typeof STYLE_KEYS)[number];
+
+export const STYLE_LABELS: Record<StyleKey, string> = {
+  title: 'Title', subtitle: 'Subtitle', h1: 'Heading 1', h2: 'Heading 2', h3: 'Heading 3',
+  h4: 'Heading 4', h5: 'Heading 5', h6: 'Heading 6', normal: 'Normal text', link: 'Links', code: 'Code',
+};
+
+/** Palette slot used for each style, like an editor's syntax highlighting of Markdown. */
+export const DEFAULT_STYLE_SLOTS: Record<StyleKey, string> = {
+  title: 'base0E', subtitle: 'base0C', h1: 'base0D', h2: 'base0B', h3: 'base0A',
+  h4: 'base09', h5: 'base08', h6: 'base0F', normal: 'base05', link: 'base0C', code: 'base0B',
+};
+
 /** Per-scheme rendering options (stored per scheme id). */
 export interface ThemeOptions {
   mapping: MappingMode;
-  /** Color headings / code / links with theme accents (document only). */
-  semantic: boolean;
+  /** Give titles, headings, links and code their own theme colors (document only). */
+  styleColors: boolean;
+  styleSlots: Record<StyleKey, string>;
   /** Dim images drawn in the document. */
   dimImages: boolean;
   /** Brightness multiplier when dimming, 0.5..1. */
@@ -31,7 +47,8 @@ export interface ThemeOptions {
 
 export const DEFAULT_OPTIONS: ThemeOptions = {
   mapping: 'snap',
-  semantic: false,
+  styleColors: true,
+  styleSlots: DEFAULT_STYLE_SLOTS,
   dimImages: false,
   dimAmount: 0.85,
 };

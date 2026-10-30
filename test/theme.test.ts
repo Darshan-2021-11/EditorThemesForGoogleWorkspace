@@ -121,7 +121,8 @@ describe('mapper (Nord, snap)', () => {
   it('colored text snaps to theme accents with readable contrast', () => {
     const red = parseColor(m.map('#ff0000', 'text'))!;
     expect(contrast(red, roles.bg)).toBeGreaterThanOrEqual(3.5);
-    expect(m.map('#1155cc', 'text')).toBe(m.map('#4a86e8', 'text')); // both blue
+    expect(m.map('#3c78d8', 'text')).toBe(m.map('#4a86e8', 'text')); // both blue
+    expect(m.map('#1155cc', 'text')).toBe(nord.palette.base0C); // Docs link color → theme link role
   });
 
   it('secondary grey text stays readable', () => {

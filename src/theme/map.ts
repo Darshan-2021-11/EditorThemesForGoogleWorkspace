@@ -71,7 +71,7 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
   }
 
   function mapChromatic(c: RGBA, [L, C, H]: [number, number, number], kind: ColorKind, forced?: AccentName | 'link'): RGBA {
-    const name = forced === 'link' ? (options.semantic ? null : 'blue') : forced ?? nearestAccent(H);
+    const name = forced === 'link' ? (options.styleColors ? null : 'blue') : forced ?? nearestAccent(H);
     const accent = name ? roles.accents[name] : roles.link;
     if (forced || options.mapping === 'snap') {
       if (kind === 'text') return withAlpha(ensureContrast(accent, roles.bg, 3.5), c.a);

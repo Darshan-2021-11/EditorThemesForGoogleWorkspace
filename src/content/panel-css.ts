@@ -76,5 +76,12 @@ summary { cursor: pointer; color: var(--dim); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px; }
 .settings { display: grid; gap: 12px; }
 .card { padding: 10px 12px; border-radius: 10px; border: 1px solid var(--surface2); display: grid; gap: 6px; }
+.styles { display: grid; gap: 3px; padding: 6px 8px; border-radius: 8px; background: var(--surface); }
+.style-row { display: flex; align-items: center; gap: 8px; }
+.style-name { min-width: 84px; font-weight: 600; font-size: 12px; }
+.dots { display: flex; flex-wrap: wrap; gap: 3px; }
+.dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--surface2); padding: 0; cursor: pointer; }
+.dot.on { outline: 2px solid var(--fg); outline-offset: 1px; }
+.styles .btn { justify-self: start; margin-top: 4px; }
 kbd { font-family: ui-monospace, monospace; font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--surface2); color: var(--fg); }
 `;

@@ -68,6 +68,8 @@ try {
   await bridge({ wdTest: 'set', ui: 'base16-nord', doc: 'base16-nord' });
   await bridge({ wdTest: 'panel', tab: 'ui' });
   await shot('6-panel-ui', 1500);
+  await bridge({ wdTest: 'panel', tab: 'doc' });
+  await shot('6b-panel-doc', 1000);
   await bridge({ wdTest: 'panel', tab: 'library' });
   await shot('7-panel-library', 1000);
 

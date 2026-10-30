@@ -4,8 +4,15 @@ import { formatColor, type RGBA } from '../theme/color';
 import { schemeToRoles } from '../theme/roles';
 import { SUGGESTED_SOURCES } from '../theme/scheme-import';
 import {
-  BASE16_KEYS, BASE24_EXTRA_KEYS, DEFAULT_OPTIONS, type Scheme, type ThemeOptions, type ThemeSpec,
+  BASE16_KEYS, BASE24_EXTRA_KEYS, DEFAULT_OPTIONS, DEFAULT_STYLE_SLOTS, STYLE_KEYS, STYLE_LABELS,
+  type Scheme, type ThemeOptions, type ThemeSpec,
 } from '../theme/types';
+
+/** Palette slots offered for paragraph-style colors: text shades plus every accent. */
+const STYLE_SLOT_CHOICES = [
+  'base04', 'base05', 'base06', 'base08', 'base09', 'base0A', 'base0B', 'base0C', 'base0D', 'base0E', 'base0F',
+  'base12', 'base13', 'base14', 'base15', 'base16', 'base17',
+];
 import { PANEL_HOST_ID } from './themer';
 import { PANEL_CSS } from './panel-css';
 
@@ -273,9 +280,10 @@ export class Panel {
         ),
       ),
       side === 'doc' && h('label', { class: 'check' },
-        h('input', { type: 'checkbox', checked: o.semantic, onchange: (e: Event) => set({ semantic: (e.target as HTMLInputElement).checked }) }),
-        'Editor-style accents (headings, links, code)',
+        h('input', { type: 'checkbox', checked: o.styleColors, onchange: (e: Event) => set({ styleColors: (e.target as HTMLInputElement).checked }) }),
+        'Color text by paragraph style',
       ),
+      side === 'doc' && o.styleColors && this.renderStyleSlots(current, (slots) => set({ styleSlots: slots })),
       side === 'doc' && h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: o.dimImages, onchange: (e: Event) => set({ dimImages: (e.target as HTMLInputElement).checked }) }),
         'Dim images',
@@ -285,6 +293,29 @@ export class Panel {
         }),
       ),
       h('div', { class: 'hint' }, 'Options are saved per theme.'),
+    );
+  }
+
+  /** One row per paragraph style: click a palette dot to choose that style's color. */
+  private renderStyleSlots(current: ThemeSpec, save: (slots: ThemeOptions['styleSlots']) => void): Node {
+    const p = current.scheme.palette;
+    const slots = { ...DEFAULT_STYLE_SLOTS, ...current.options.styleSlots };
+    return h('div', { class: 'styles' },
+      STYLE_KEYS.map((k) =>
+        h('div', { class: 'style-row' },
+          h('span', { class: 'style-name', style: `color:${p[slots[k]]}` }, STYLE_LABELS[k]),
+          h('span', { class: 'dots' },
+            STYLE_SLOT_CHOICES.filter((s) => p[s]).map((s) =>
+              h('button', {
+                class: s === slots[k] ? 'dot on' : 'dot', style: `background:${p[s]}`,
+                title: `${s} · ${SLOT_LABELS[s]}`, 'aria-label': `${STYLE_LABELS[k]}: ${SLOT_LABELS[s]}`,
+                onclick: () => save({ ...slots, [k]: s }),
+              }),
+            ),
+          ),
+        ),
+      ),
+      h('button', { class: 'btn small', onclick: () => save({ ...DEFAULT_STYLE_SLOTS }) }, 'Reset style colors'),
     );
   }
 
