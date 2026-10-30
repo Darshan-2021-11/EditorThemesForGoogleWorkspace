@@ -1,6 +1,7 @@
 // Isolated-world content script: runs in every Google Docs/Drive frame at document_start.
 import { send, type PageState, type Push } from '../shared/messages';
 import { appOf } from '../shared/page';
+import { DOC_STYLES_EVENT } from '../shared/hook-protocol';
 import type { ThemeSpec } from '../theme/types';
 import { Panel } from './panel';
 import { profileFor } from './profiles';
@@ -10,7 +11,19 @@ const isTop = window === window.top;
 const profile = profileFor(appOf(location.href));
 const themer = new PageThemer(profile);
 
-let state: PageState = { key: '', theme: null, hasSchemes: false };
+let state: PageState = { key: '', theme: null, styleOverrides: {}, hasSchemes: false };
+
+// The hook read the document's paragraph-style colors: let the background notice user changes.
+if (isTop) {
+  window.addEventListener(DOC_STYLES_EVENT, (e) => {
+    try {
+      const colors = JSON.parse(String((e as CustomEvent).detail)) as Record<string, string>;
+      send({ type: 'docStyleColors', colors }).catch(() => {});
+    } catch {
+      // ignore malformed event
+    }
+  });
+}
 /** A theme shown temporarily (hover preview, custom editor) without being saved. */
 let previewing: ThemeSpec | null | undefined;
 

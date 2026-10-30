@@ -5,7 +5,10 @@ import {
 } from '../shared/messages';
 import { GOOGLE_TAB_PATTERNS, pageKey } from '../shared/page';
 import { importFromUrl, slugify } from '../theme/scheme-import';
-import { DEFAULT_OPTIONS, type Scheme, type ThemeOptions, type ThemeSpec } from '../theme/types';
+import { styleValueForDocColor } from '../theme/style-colors';
+import {
+  DEFAULT_OPTIONS, DEFAULT_STYLE_SLOTS, STYLE_KEYS, type Scheme, type ThemeOptions, type ThemeSpec,
+} from '../theme/types';
 
 // ------------------------------------------------------------------------------------------
 // In-memory cache over IndexedDB (rebuilt whenever the event page wakes up)
@@ -41,7 +44,8 @@ function cache(): Promise<Cache> {
 type Legacy = { ui?: string | null; doc?: string | null; defaultUi?: string | null; defaultDoc?: string | null; lastUi?: string | null; lastDoc?: string | null };
 
 function migratePage(p: PageSetting & Legacy): PageSetting {
-  return { key: p.key, theme: p.theme !== undefined ? p.theme : p.doc ?? p.ui ?? null, updated: p.updated };
+  const { ui, doc, ...rest } = p;
+  return { ...rest, theme: p.theme !== undefined ? p.theme : doc ?? ui ?? null };
 }
 
 function migrateSettings(s: (GlobalSettings & Legacy) | undefined): GlobalSettings {
@@ -74,14 +78,26 @@ function effective(c: Cache, key: string): string | null {
 export async function resolvePage(url: string): Promise<PageState> {
   const c = await cache();
   const key = pageKey(url);
-  return { key, theme: spec(c, effective(c, key)), hasSchemes: c.schemes.size > 0 };
+  const overrides = c.pages.get(key)?.styleOverrides ?? {};
+  let theme = spec(c, effective(c, key));
+  if (theme) {
+    const styleSlots = { ...DEFAULT_STYLE_SLOTS, ...theme.options.styleSlots, ...overrides };
+    theme = { ...theme, options: { ...theme.options, styleSlots } };
+  }
+  return { key, theme, styleOverrides: overrides, hasSchemes: c.schemes.size > 0 };
+}
+
+/** Updates a page record, keeping fields not in `patch` (theme, remembered style colors). */
+async function patchPage(key: string, patch: Partial<Omit<PageSetting, 'key'>>) {
+  const c = await cache();
+  const prev = c.pages.get(key);
+  const rec: PageSetting = { theme: effective(c, key), ...prev, ...patch, key, updated: Date.now() };
+  c.pages.set(key, rec);
+  await db.put('pages', rec);
 }
 
 async function savePage(key: string, theme: string | null) {
-  const c = await cache();
-  const rec: PageSetting = { key, theme, updated: Date.now() };
-  c.pages.set(key, rec);
-  await db.put('pages', rec);
+  await patchPage(key, { theme });
 }
 
 async function saveSettings(patch: Partial<GlobalSettings>) {
@@ -233,6 +249,71 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
     await broadcast({ type: 'schemesChanged' });
     await broadcastState();
     return { schemes: d.schemes?.length ?? 0, pages: d.pages?.length ?? 0 };
+  },
+
+  /**
+   * The document's named-style colors, read by the hook. The first reading is the baseline (a
+   * template's own colors keep the theme's varied defaults); a style whose color changes after
+   * that was restyled by the user, so it follows their choice from then on.
+   */
+  async docStyleColors(req, sender) {
+    const c = await cache();
+    const key = pageKey(sender.tab!.url!);
+    const page = c.pages.get(key);
+    const before = page?.docStyles;
+    const overrides = { ...page?.styleOverrides };
+    let changed = false;
+    if (before) {
+      const theme = spec(c, effective(c, key));
+      for (const k of STYLE_KEYS) {
+        const now = req.colors[k];
+        if (!now || now === before[k] || !theme) continue;
+        overrides[k] = styleValueForDocColor(theme, now, k);
+        changed = true;
+      }
+    }
+    if (!before || changed || JSON.stringify(before) !== JSON.stringify(req.colors)) {
+      await patchPage(key, { docStyles: req.colors, styleOverrides: overrides });
+    }
+    if (changed) await broadcastState(key);
+  },
+
+  /** A color picked in the panel: becomes the theme's color for that style, and replaces this page's override. */
+  async setStyleSlot(req, sender) {
+    const c = await cache();
+    const key = pageKey(sender.tab!.url!);
+    const id = effective(c, key);
+    if (!id) return;
+    const options = { ...DEFAULT_OPTIONS, ...c.options.get(id) };
+    options.styleSlots = { ...DEFAULT_STYLE_SLOTS, ...options.styleSlots, [req.style]: req.value };
+    c.options.set(id, options);
+    await db.put('options', { id, ...options });
+    const overrides = { ...c.pages.get(key)?.styleOverrides };
+    if (req.style in overrides) {
+      delete overrides[req.style];
+      await patchPage(key, { styleOverrides: overrides });
+    }
+    await broadcastState();
+  },
+
+  async resetStyleColors(_req, sender) {
+    const c = await cache();
+    const key = pageKey(sender.tab!.url!);
+    const id = effective(c, key);
+    if (id) {
+      const options = { ...DEFAULT_OPTIONS, ...c.options.get(id), styleSlots: { ...DEFAULT_STYLE_SLOTS } };
+      c.options.set(id, options);
+      await db.put('options', { id, ...options });
+    }
+    await patchPage(key, { styleOverrides: {} });
+    await broadcastState();
+  },
+
+  /** Forget the colors this page picked up from the document (they were saved into a preset). */
+  async resetStyleOverrides(_req, sender) {
+    const key = pageKey(sender.tab!.url!);
+    await patchPage(key, { styleOverrides: {} });
+    await broadcastState(key);
   },
 
   async fetchText(req) {

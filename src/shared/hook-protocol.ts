@@ -12,6 +12,9 @@ export const READY_EVENT = 'wd-hook-ready';
  * { id, color: string | null }.
  */
 export const QUERY_EVENT = 'wd-hook-query';
+
+/** hook → content: the document's named-style colors were read. detail = JSON Record<StyleKey, hex> */
+export const DOC_STYLES_EVENT = 'wd-hook-doc-styles';
 export const ANSWER_EVENT = 'wd-hook-answer';
 
 export interface TextColorQuery {

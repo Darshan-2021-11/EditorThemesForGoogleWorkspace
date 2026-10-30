@@ -6,8 +6,8 @@ import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles } from '../theme/roles';
 import { styleColors as computeStyleColors } from '../theme/style-colors';
 import type { ColorKind, StyleKey, ThemeSpec } from '../theme/types';
-import { ANSWER_EVENT, CONFIG_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
-import { buildIndex, parseExportHtml, StyleLearner, styleFromName } from './styles';
+import { ANSWER_EVENT, CONFIG_EVENT, DOC_STYLES_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
+import { buildIndex, parseExportHtml, parseStyleColors, StyleLearner, styleFromName } from './styles';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 type Style = string | CanvasGradient | CanvasPattern;
@@ -43,6 +43,8 @@ function styleColorFor(font: string, fill: string, text: string): string | null 
   if (!styleColors) return null;
   if (LINK_COLORS.has(fill)) return styleColors.link;
   if (MONO_RE.test(font)) return styleColors.code;
+  // Redraws can mean restyled paragraphs (e.g. a changed Heading 2 color): re-check now and then.
+  if (learner) scheduleIndexRefresh(20000);
   const s = learner?.classify(font, text);
   if (s) return styleColors[s];
   return isInk(fill) ? styleColors.normal : null;
@@ -84,9 +86,12 @@ async function fetchParagraphIndex() {
       indexAvailable = false;
       return;
     }
-    const index = buildIndex(parseExportHtml(await res.text()));
+    const html = await res.text();
+    const index = buildIndex(parseExportHtml(html));
+    // Named-style colors go to the extension, which notices when the user changes one.
+    window.dispatchEvent(new CustomEvent(DOC_STYLES_EVENT, { detail: JSON.stringify(parseStyleColors(html)) }));
     if (learner) learner.setIndex(index);
-    else learner = new StyleLearner(index, scheduleRepaint, scheduleIndexRefresh);
+    else learner = new StyleLearner(index, scheduleRepaint, () => scheduleIndexRefresh());
     if (__WD_DEV__) (debug as Record<string, unknown>).learner = learner;
     learnedRepaints = 0;
     repaint();
@@ -101,9 +106,9 @@ async function fetchParagraphIndex() {
  * Text the index doesn't know was drawn (the user typed or added a heading): re-read paragraph
  * styles once editing pauses, at most every 15 s.
  */
-function scheduleIndexRefresh() {
-  if (refreshTimer || !indexAvailable) return;
-  const wait = Math.max(2500, 15000 - (Date.now() - lastIndexFetch));
+function scheduleIndexRefresh(minGap = 15000) {
+  if (refreshTimer || !indexAvailable || document.visibilityState !== 'visible') return;
+  const wait = Math.max(2500, minGap - (Date.now() - lastIndexFetch));
   refreshTimer = window.setTimeout(() => {
     refreshTimer = 0;
     fetchParagraphIndex();

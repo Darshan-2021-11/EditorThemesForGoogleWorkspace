@@ -82,6 +82,12 @@ summary { cursor: pointer; color: var(--dim); }
 .dots { display: flex; flex-wrap: wrap; gap: 3px; }
 .dot { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--surface2); padding: 0; cursor: pointer; }
 .dot.on { outline: 2px solid var(--fg); outline-offset: 1px; }
-.styles .btn { justify-self: start; margin-top: 4px; }
+.styles .btn { justify-self: start; }
+.styles .actions { margin-top: 4px; }
+.style-row .badge { margin-left: auto; white-space: nowrap; }
+.dot.custom { border-radius: 3px; }
+.save-preset { display: flex; gap: 6px; margin-top: 6px; }
+.save-preset input { flex: 1; min-width: 0; padding: 4px 8px; font-size: 12px; }
+.save-preset .btn { white-space: nowrap; }
 kbd { font-family: ui-monospace, monospace; font-size: 11px; padding: 1px 5px; border-radius: 4px; background: var(--surface2); color: var(--fg); }
 `;

@@ -1,4 +1,29 @@
-import { buildIndex, lookup, normText, parseExportHtml, StyleLearner } from '../src/hook/styles';
+import { buildIndex, lookup, normText, parseExportHtml, parseStyleColors, StyleLearner } from '../src/hook/styles';
+import { styleColors, styleValueForDocColor } from '../src/theme/style-colors';
+import { DEFAULT_OPTIONS } from '../src/theme/types';
+import { nord } from './fixtures';
+
+describe('document style colors', () => {
+  const html = '<html><head><style>.c1{color:#ff0000}p{margin:0;color:#000000;font-size:11pt}' +
+    'h2{padding-top:18pt;color:#e69138;font-weight:700}.title{color:#000000}.subtitle{color:#666666}</style></head><body></body></html>';
+
+  it('reads named paragraph style colors from the export CSS', () => {
+    expect(parseStyleColors(html)).toEqual({ normal: '#000000', h2: '#e69138', title: '#000000', subtitle: '#666666' });
+  });
+
+  it('a style color the user picks lands on the matching palette color', () => {
+    const spec = { scheme: nord, options: DEFAULT_OPTIONS };
+    expect(styleValueForDocColor(spec, '#e69138', 'h2')).toBe('base09'); // orange → Nord orange
+    expect(styleValueForDocColor(spec, '#ff0000', 'h1')).toBe('base08');
+  });
+
+  it('keep-hue colors that are not in the palette become their own color option', () => {
+    const spec = { scheme: nord, options: { ...DEFAULT_OPTIONS, mapping: 'keep-hue' as const } };
+    const v = styleValueForDocColor(spec, '#ff00aa', 'h1');
+    expect(v).toMatch(/^#[0-9a-f]{6}$/);
+    expect(styleColors({ ...spec, options: { ...spec.options, styleSlots: { ...spec.options.styleSlots, h1: v } } }).h1).toBe(v);
+  });
+});
 
 describe('export html parsing', () => {
   it('extracts styled paragraphs and decodes entities', () => {

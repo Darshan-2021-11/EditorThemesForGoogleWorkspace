@@ -38,6 +38,7 @@ export interface ThemeOptions {
   mapping: MappingMode;
   /** Give titles, headings, links and code their own theme colors (document only). */
   styleColors: boolean;
+  /** Per style: a palette slot ("base0D") or a color outside the palette ("#rrggbb"). */
   styleSlots: Record<StyleKey, string>;
   /** Dim images drawn in the document. */
   dimImages: boolean;

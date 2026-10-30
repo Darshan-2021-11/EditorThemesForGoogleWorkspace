@@ -3,17 +3,11 @@ import { send, type GlobalSettings, type PageState, type PanelTab } from '../sha
 import { formatColor, type RGBA } from '../theme/color';
 import { schemeToRoles } from '../theme/roles';
 import { SUGGESTED_SOURCES } from '../theme/scheme-import';
-import { styleColors } from '../theme/style-colors';
+import { STYLE_SLOT_CHOICES, styleColors } from '../theme/style-colors';
 import {
   BASE16_KEYS, BASE24_EXTRA_KEYS, DEFAULT_OPTIONS, DEFAULT_STYLE_SLOTS, STYLE_KEYS, STYLE_LABELS,
-  type Scheme, type ThemeOptions, type ThemeSpec,
+  type Scheme, type StyleKey, type ThemeOptions, type ThemeSpec,
 } from '../theme/types';
-
-/** Palette slots offered for paragraph-style colors: text shades plus every accent. */
-const STYLE_SLOT_CHOICES = [
-  'base04', 'base05', 'base06', 'base08', 'base09', 'base0A', 'base0B', 'base0C', 'base0D', 'base0E', 'base0F',
-  'base12', 'base13', 'base14', 'base15', 'base16', 'base17',
-];
 import { PANEL_HOST_ID } from './themer';
 import { PANEL_CSS } from './panel-css';
 
@@ -277,7 +271,7 @@ export class Panel {
         h('input', { type: 'checkbox', checked: o.styleColors, onchange: (e: Event) => set({ styleColors: (e.target as HTMLInputElement).checked }) }),
         'Color text by paragraph style',
       ),
-      o.styleColors && this.renderStyleSlots(current, (slots) => set({ styleSlots: slots })),
+      o.styleColors && this.renderStyleSlots(current),
       h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: o.dimImages, onchange: (e: Event) => set({ dimImages: (e.target as HTMLInputElement).checked }) }),
         'Dim images',
@@ -293,29 +287,67 @@ export class Panel {
     );
   }
 
-  /** One row per paragraph style: click a palette dot to choose that style's color. */
-  private renderStyleSlots(current: ThemeSpec, save: (slots: ThemeOptions['styleSlots']) => void): Node {
+  /**
+   * One row per paragraph style: click a palette dot to choose that style's color. A color you
+   * gave the style in Docs shows as its palette dot, or as an extra dot when it isn't a palette color.
+   */
+  private renderStyleSlots(current: ThemeSpec): Node {
     const p = current.scheme.palette;
+    const overrides = this.host.getState().styleOverrides;
     const slots = { ...DEFAULT_STYLE_SLOTS, ...current.options.styleSlots };
     // the exact colors the page paints with (same function as the canvas hook)
     const shown = styleColors({ ...current, options: { ...current.options, styleSlots: slots } });
+    const pick = (k: StyleKey, value: string) => send({ type: 'setStyleSlot', style: k, value });
+    const nameInput = h('input', { type: 'text', placeholder: `${current.scheme.name} (my colors)` });
     return h('div', { class: 'styles' },
-      STYLE_KEYS.map((k) =>
-        h('div', { class: 'style-row' },
+      STYLE_KEYS.map((k) => {
+        const fromDoc = k in overrides;
+        const custom = slots[k].startsWith('#') ? slots[k] : null;
+        return h('div', { class: 'style-row' },
           h('span', { class: 'style-name', style: `color:${shown[k]}` }, STYLE_LABELS[k]),
           h('span', { class: 'dots' },
             STYLE_SLOT_CHOICES.filter((s) => p[s]).map((s) =>
               h('button', {
                 class: s === slots[k] ? 'dot on' : 'dot', style: `background:${p[s]}`,
                 title: `${s} · ${SLOT_LABELS[s]}`, 'aria-label': `${STYLE_LABELS[k]}: ${SLOT_LABELS[s]}`,
-                onclick: () => save({ ...slots, [k]: s }),
+                onclick: () => pick(k, s),
               }),
             ),
+            custom && h('button', {
+              class: 'dot on custom', style: `background:${custom}`,
+              title: `${custom} · ${fromDoc ? 'the color you gave this style in Docs' : 'custom color'}`,
+              onclick: () => pick(k, custom),
+            }),
           ),
-        ),
+          fromDoc && h('span', { class: 'badge', title: 'Follows the color you set for this style in the document' }, 'from doc'),
+        );
+      }),
+      h('div', { class: 'actions' },
+        h('button', { class: 'btn small', onclick: () => send({ type: 'resetStyleColors' }) }, 'Reset style colors'),
       ),
-      h('button', { class: 'btn small', onclick: () => save({ ...DEFAULT_STYLE_SLOTS }) }, 'Reset style colors'),
+      h('div', { class: 'save-preset' },
+        nameInput,
+        h('button', {
+          class: 'btn small primary',
+          title: 'Save this theme with these style colors as your own preset',
+          onclick: () => this.saveStylePreset(current, nameInput.value.trim() || nameInput.placeholder),
+        }, 'Save as preset'),
+      ),
     );
+  }
+
+  /** Saves the current theme plus its effective style colors as a new custom preset and applies it. */
+  private async saveStylePreset(current: ThemeSpec, name: string) {
+    const saved = await send({
+      type: 'saveCustomScheme',
+      scheme: { ...current.scheme, id: 'custom-new', name, source: 'custom', origin: current.scheme.id, palette: { ...current.scheme.palette } },
+    });
+    await send({ type: 'setOptions', id: saved.id, options: { ...current.options } });
+    await send({ type: 'setPageTheme', theme: saved.id });
+    await send({ type: 'resetStyleOverrides' });
+    await this.reload();
+    this.status = `Saved preset “${saved.name}” and applied it.`;
+    this.render();
   }
 
   // ---- Library ----------------------------------------------------------------------------

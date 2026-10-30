@@ -1,4 +1,4 @@
-import type { Scheme, ThemeOptions, ThemeSpec } from '../theme/types';
+import type { Scheme, StyleKey, ThemeOptions, ThemeSpec } from '../theme/types';
 
 export interface GlobalSettings {
   id: 'global';
@@ -18,11 +18,18 @@ export interface PageSetting {
   key: string;
   theme: string | null;
   updated: number;
+  /** The document's named-style colors when last seen (raw Docs colors). */
+  docStyles?: Partial<Record<StyleKey, string>>;
+  /** Style colors the user changed in Docs, as theme values (slot or "#rrggbb"). */
+  styleOverrides?: Partial<Record<StyleKey, string>>;
 }
 
 export interface PageState {
   key: string;
+  /** Theme with this page's style overrides already merged into options.styleSlots. */
   theme: ThemeSpec | null;
+  /** Which styles follow a color the user picked in the document. */
+  styleOverrides: Partial<Record<StyleKey, string>>;
   /** False until the user has imported at least one scheme. */
   hasSchemes: boolean;
 }
@@ -56,7 +63,11 @@ export type Request =
   | { type: 'setSettings'; patch: Partial<Omit<GlobalSettings, 'id'>> }
   | { type: 'exportBackup' }
   | { type: 'importBackup'; data: BackupFile }
-  | { type: 'fetchText'; url: string };
+  | { type: 'fetchText'; url: string }
+  | { type: 'docStyleColors'; colors: Partial<Record<StyleKey, string>> }
+  | { type: 'setStyleSlot'; style: StyleKey; value: string }
+  | { type: 'resetStyleColors' }
+  | { type: 'resetStyleOverrides' };
 
 export interface ResponseMap {
   getPageState: PageState;
@@ -73,6 +84,10 @@ export interface ResponseMap {
   exportBackup: BackupFile;
   importBackup: { schemes: number; pages: number };
   fetchText: string | null;
+  docStyleColors: void;
+  setStyleSlot: void;
+  resetStyleColors: void;
+  resetStyleOverrides: void;
 }
 
 /** background → content (all frames of a tab) */

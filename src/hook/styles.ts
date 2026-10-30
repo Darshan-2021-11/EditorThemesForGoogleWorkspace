@@ -41,6 +41,24 @@ export function parseExportHtml(html: string): { tag: string; className: string;
   return out;
 }
 
+/**
+ * The color of each named paragraph style (Format → Paragraph styles), from the export's CSS:
+ * `.title{…color:#…}`, `.subtitle{…}`, `h1{…}`…`h6{…}` and `p{…}` for Normal text.
+ */
+export function parseStyleColors(html: string): Partial<Record<StyleKey, string>> {
+  const css = /<style[^>]*>([\s\S]*?)<\/style>/i.exec(html)?.[1] ?? '';
+  const out: Partial<Record<StyleKey, string>> = {};
+  // lookbehind (not a consumed "}") so back-to-back rules are all seen
+  const re = /(?<=^|[}\s])(\.title|\.subtitle|h[1-6]|p)\s*\{([^}]*)\}/g;
+  for (let m = re.exec(css); m; m = re.exec(css)) {
+    const color = /(?:^|;)\s*color\s*:\s*(#[0-9a-f]{3,8})/i.exec(m[2])?.[1];
+    if (!color) continue;
+    const key = (m[1] === 'p' ? 'normal' : m[1].replace('.', '')) as StyleKey;
+    out[key] ??= color.toLowerCase();
+  }
+  return out;
+}
+
 /** Text → every style a paragraph with that text has (the same text can be a Heading 2 and a Heading 3). */
 export interface ParagraphIndex {
   full: Map<string, StyleKey[]>;
