@@ -65,6 +65,19 @@ describe('paragraph style recognition', () => {
     expect(l.classify('400 22px Roboto', 'Lorem ipsum')).toBe('h2');
   });
 
+  it('new headings: unknown text asks for a refresh once; the refreshed index styles it', () => {
+    let misses = 0;
+    const l = new StyleLearner(buildIndex([{ tag: 'H1', className: '', text: 'Intro' }]), undefined, () => misses++);
+    expect(l.classify('700 14.6667px Arial', 'Fresh heading six')).toBeNull();
+    l.classify('700 14.6667px Arial', 'Fresh heading six');
+    expect(misses).toBe(1); // same text doesn't ask twice
+    l.setIndex(buildIndex([
+      { tag: 'H1', className: '', text: 'Intro' },
+      { tag: 'H6', className: '', text: 'Fresh heading six' },
+    ]));
+    expect(l.classify('700 14.6667px Arial', 'Fresh heading six')).toBe('h6');
+  });
+
   it('enlarged plain text gets heading colors by size', () => {
     let changes = 0;
     const l = new StyleLearner(index, () => changes++);

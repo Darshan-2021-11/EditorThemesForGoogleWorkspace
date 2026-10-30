@@ -63,23 +63,51 @@ function isInk(css: string): boolean {
 
 /** Reads paragraph styles from the document's HTML export (read-only; Docs editor pages only). */
 let indexRequested = false;
+let indexAvailable = true;
+let lastIndexFetch = 0;
+let refreshTimer = 0;
 async function loadParagraphIndex() {
   if (indexRequested) return;
   indexRequested = true;
+  await fetchParagraphIndex();
+}
+
+async function fetchParagraphIndex() {
   const id = /\/document\/(?:u\/\d+\/)?d\/([\w-]{10,})/.exec(location.pathname)?.[1];
   if (__WD_DEV__) (debug as Record<string, unknown>).indexStart = { id, top: window === window.top };
   if (!id || window !== window.top) return;
+  lastIndexFetch = Date.now();
   try {
     const res = await fetch(`/document/d/${id}/export?format=html`, { credentials: 'include' });
     if (__WD_DEV__) (debug as Record<string, unknown>).indexStatus = res.status;
-    if (!res.ok) return;
-    learner = new StyleLearner(buildIndex(parseExportHtml(await res.text())), scheduleRepaint);
+    if (!res.ok) {
+      indexAvailable = false;
+      return;
+    }
+    const index = buildIndex(parseExportHtml(await res.text()));
+    if (learner) learner.setIndex(index);
+    else learner = new StyleLearner(index, scheduleRepaint, scheduleIndexRefresh);
     if (__WD_DEV__) (debug as Record<string, unknown>).learner = learner;
+    learnedRepaints = 0;
     repaint();
   } catch (e) {
     // export unavailable (e.g. downloads disabled): headings keep plain mapping
+    indexAvailable = false;
     if (__WD_DEV__) (debug as Record<string, unknown>).indexError = String(e);
   }
+}
+
+/**
+ * Text the index doesn't know was drawn (the user typed or added a heading): re-read paragraph
+ * styles once editing pauses, at most every 15 s.
+ */
+function scheduleIndexRefresh() {
+  if (refreshTimer || !indexAvailable) return;
+  const wait = Math.max(2500, 15000 - (Date.now() - lastIndexFetch));
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = 0;
+    fetchParagraphIndex();
+  }, wait);
 }
 
 // ------------------------------------------------------------------------------------------

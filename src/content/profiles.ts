@@ -1,6 +1,7 @@
 // Per-app knowledge: where the "document" lives inside each Google app's page.
 import { formatColor, type RGBA } from '../theme/color';
 import type { Roles } from '../theme/roles';
+import type { ThemeOptions } from '../theme/types';
 import type { AppId } from '../shared/page';
 
 export interface AppProfile {
@@ -20,8 +21,8 @@ export interface AppProfile {
     /** The text-color button's color bar, plus the toolbar boxes describing the cursor's text. */
     textIndicator: string; fontSize: string; zoom: string; paragraphStyle: string;
   };
-  /** CSS for the document surface. */
-  docCss(r: Roles): string;
+  /** CSS for the document surface (page background, image dimming). */
+  docCss(r: Roles, o: ThemeOptions): string;
   /** Extra UI CSS. */
   uiCss(r: Roles): string;
 }
@@ -45,10 +46,12 @@ const docs: AppProfile = {
     zoom: 'input[aria-label="Zoom"]',
     paragraphStyle: '#headingStyleSelect',
   },
-  docCss: (r) => `
+  docCss: (r, o) => `
     .kix-page-paginated, .kix-page-compact, .kix-page, .kix-page-content-wrapper,
     .kix-paginateddocumentplugin .kix-page { background-color: ${hex(r.bg)} !important; }
-    .kix-page-paginated { box-shadow: 0 0 0 1px ${hex(r.surfaceAlt)} !important; }`,
+    .kix-page-paginated { box-shadow: 0 0 0 1px ${hex(r.surfaceAlt)} !important; }` +
+    // Docs draws pictures as SVG <image> over the text canvas, not on the canvas itself.
+    (o.dimImages ? `.kix-canvas-tile-content image, .kix-page-paginated img { filter: brightness(${o.dimAmount}) !important; }` : ''),
   uiCss: () => '',
 };
 
@@ -58,7 +61,8 @@ const sheets: AppProfile = {
   canvasDoc: true,
   keepColors: KEEP_COLORS,
   // Only layers *below* the grid canvas: .grid4-inner-container sits above it (z-index 3).
-  docCss: (r) => `#waffle-grid-container, .grid-container { background-color: ${hex(r.bg)} !important; }`,
+  docCss: (r, o) => `#waffle-grid-container, .grid-container { background-color: ${hex(r.bg)} !important; }` +
+    (o.dimImages ? `#waffle-grid-container img { filter: brightness(${o.dimAmount}) !important; }` : ''),
   uiCss: () => '',
 };
 

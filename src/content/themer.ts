@@ -129,7 +129,7 @@ export class PageThemer {
         `html,body{background-color:${hex(r.bg)};}` +
         `::selection{background-color:${formatColor({ ...r.selection, a: 0.85 })};}` +
         this.profile.uiCss(r) +
-        this.profile.docCss(r);
+        this.profile.docCss(r, this.spec!.options);
     }
     // Order doesn't matter for these: per-sheet overrides sit right after their source sheet and
     // inline/document rules are !important.

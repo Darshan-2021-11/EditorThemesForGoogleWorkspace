@@ -112,12 +112,30 @@ export class StyleLearner {
    * @param onChange called when earlier answers may have been wrong (a font's style was learned
    *   or the body size became known), so already-painted text should be repainted.
    */
-  constructor(private index: ParagraphIndex, private onChange?: () => void) {}
+  constructor(
+    private index: ParagraphIndex,
+    private onChange?: () => void,
+    /** Called when a run's text isn't in the index (likely new or edited text). */
+    private onMiss?: () => void,
+  ) {}
+
+  /** Texts that stayed unknown after a refresh (e.g. lines of a multi-line paragraph). */
+  private knownMisses = new Set<string>();
+  private newMisses = new Set<string>();
+
+  /** Replaces the paragraph index after the document changed; learned fonts are kept. */
+  setIndex(index: ParagraphIndex) {
+    this.index = index;
+    for (const t of this.newMisses) if (this.knownMisses.size < 5000) this.knownMisses.add(t);
+    this.newMisses.clear();
+    this.decided.clear();
+  }
 
   /** Returns the heading/title style for a run in `font`, or null for body text. */
   classify(font: string, text: string): StyleKey | null {
     const cands = lookup(this.index, text);
     if (cands) this.vote(font, cands, normText(text).length);
+    else this.noteMiss(text);
     // A run that is exactly one styled paragraph: that's its style, whatever its font.
     if (cands?.length === 1 && cands[0] !== 'normal') return cands[0];
     // Otherwise: what this font is used for in this document…
@@ -142,6 +160,13 @@ export class StyleLearner {
   /** Size-based style for text of `px` that has no recognised paragraph style. */
   tierFor(px: number): StyleKey | null {
     return this.totalBody < 300 ? null : sizeTier(px, this.bodyPx);
+  }
+
+  private noteMiss(text: string) {
+    const t = normText(text);
+    if (t.length < 3 || this.knownMisses.has(t) || this.newMisses.has(t)) return;
+    this.newMisses.add(t);
+    this.onMiss?.();
   }
 
   /** Ambiguous matches split their weight between the candidate styles. */
