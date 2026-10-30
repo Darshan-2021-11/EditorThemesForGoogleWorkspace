@@ -281,10 +281,13 @@ export class Panel {
       h('label', { class: 'check' },
         h('input', { type: 'checkbox', checked: o.dimImages, onchange: (e: Event) => set({ dimImages: (e.target as HTMLInputElement).checked }) }),
         'Dim images',
+        // The slider is dimming strength (right = dimmer); stored as the brightness multiplier.
         o.dimImages && h('input', {
-          type: 'range', min: '0.5', max: '1', step: '0.05', value: String(o.dimAmount),
-          onchange: (e: Event) => set({ dimAmount: Number((e.target as HTMLInputElement).value) }),
+          type: 'range', min: '0', max: '0.5', step: '0.05', value: String(+(1 - o.dimAmount).toFixed(2)),
+          title: `Dimmed by ${Math.round((1 - o.dimAmount) * 100)}%`,
+          onchange: (e: Event) => set({ dimAmount: +(1 - Number((e.target as HTMLInputElement).value)).toFixed(2) }),
         }),
+        o.dimImages && h('span', { class: 'hint' }, `${Math.round((1 - o.dimAmount) * 100)}%`),
       ),
       h('div', { class: 'hint' }, 'Options are saved per theme.'),
     );
