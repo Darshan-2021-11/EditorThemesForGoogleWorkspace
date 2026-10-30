@@ -95,9 +95,10 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
     if (kind === 'onAccent') return withAlpha(roles.bg, c.a);
     const lch = toOklch(c);
     const forced = SEMANTIC[hex ?? formatColor({ ...c, a: 1 })];
-    if (forced) return mapChromatic(c, lch, kind, forced);
-    if (lch[1] < GREY_CHROMA) return mapGrey(lch[0], c, kind);
-    return mapChromatic(c, lch, kind);
+    const out = forced ? mapChromatic(c, lch, kind, forced) : lch[1] < GREY_CHROMA ? mapGrey(lch[0], c, kind) : mapChromatic(c, lch, kind);
+    // Translucent ink (disabled items, hints) fades much more on dark backgrounds than on white.
+    if (kind === 'text' && out.a < 0.7 && roles.isDark) out.a = 0.3 + out.a * 0.6;
+    return out;
   }
 
   function map(css: string, kind: ColorKind): string {

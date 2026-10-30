@@ -54,6 +54,25 @@ browser.runtime.onMessage.addListener((msg: Push) => {
   }
 });
 
+if (__WD_DEV__ && isTop) {
+  // Test bridge for scripts/visual-test.mjs: window.postMessage({ wdTest: 'import' | 'set' | 'options' | 'panel', ... })
+  window.addEventListener('message', async (e) => {
+    const d = e.data as { wdTest?: string; id?: number; url?: string; ui?: string | null; doc?: string | null; scheme?: string; options?: never; tab?: never };
+    if (e.source !== window || !d?.wdTest) return;
+    let result: unknown;
+    try {
+      if (d.wdTest === 'import') result = await send({ type: 'importSchemes', url: d.url! });
+      if (d.wdTest === 'set') result = await send({ type: 'setPageThemes', ui: d.ui, doc: d.doc });
+      if (d.wdTest === 'options') result = await send({ type: 'setOptions', id: d.scheme!, options: d.options! });
+      if (d.wdTest === 'panel') result = await panel?.show(d.tab);
+      if (d.wdTest === 'state') result = state;
+    } catch (err) {
+      result = { error: String(err) };
+    }
+    window.postMessage({ wdTestResult: d.id, result: JSON.parse(JSON.stringify(result ?? null)) }, '*');
+  });
+}
+
 send({ type: 'getPageState' })
   .then((s) => {
     state = s;

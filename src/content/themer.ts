@@ -23,6 +23,17 @@ const INLINE_ATTRS = INLINE.map((i) => i[1]);
 
 const hex = (c: RGBA) => formatColor({ ...c, a: 1 });
 
+/**
+ * SVG paint: glyph-like shapes (text, UI icon paths) are foreground; areas (rects, and every
+ * non-text shape inside the document, like the page background Docs draws as a <rect>) are fills.
+ */
+function svgKind(el: Element, inDoc: boolean, base: ColorKind): ColorKind {
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'text' || tag === 'tspan') return 'text';
+  if (inDoc || tag === 'rect') return base === 'text' ? 'fill' : base;
+  return base;
+}
+
 interface SheetSource {
   rules: ColorRule[];
   override: HTMLStyleElement;
@@ -217,7 +228,8 @@ export class PageThemer {
     const m = inDoc ? this.doc : this.ui;
     const keep = !!el.closest(this.profile.keepColors);
     const style = (el as HTMLElement).style as CSSStyleDeclaration | undefined;
-    for (const [read, attr, kind, prop] of INLINE) {
+    for (const [read, attr, baseKind, prop] of INLINE) {
+      const kind = read === 'fill' || read === 'stroke' ? svgKind(el, inDoc, baseKind) : baseKind;
       let v = style?.getPropertyValue(read) ?? '';
       if (!v && (read === 'fill' || read === 'stroke')) v = el.getAttribute(read) ?? '';
       const c = m && !keep && v ? parseColor(v) : null;

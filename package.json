@@ -12,13 +12,14 @@
     "typecheck": "tsc --noEmit",
     "lint:ext": "web-ext lint --source-dir dist",
     "package": "node scripts/build.mjs && web-ext build --source-dir dist --artifacts-dir artifacts --overwrite-dest",
-    "fetch-schemes": "node scripts/fetch-schemes.ts"
+    "visual-test": "node scripts/visual-test.mjs"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1"
   },
   "devDependencies": {
     "@types/firefox-webext-browser": "^120.0.4",
+    "selenium-webdriver": "^4.52.0",
     "typescript": "^5.9.3",
     "vite": "^7.1.12",
     "vitest": "^3.2.4",

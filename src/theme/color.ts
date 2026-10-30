@@ -12,6 +12,9 @@ const NAMED: Record<string, string> = {
   magenta: 'ff00ff', olive: '808000', whitesmoke: 'f5f5f5', gainsboro: 'dcdcdc', lightgray: 'd3d3d3',
   lightgrey: 'd3d3d3', darkgray: 'a9a9a9', darkgrey: 'a9a9a9', dimgray: '696969', dimgrey: '696969',
   ghostwhite: 'f8f8ff', snow: 'fffafa', ivory: 'fffff0', linen: 'faf0e6', aliceblue: 'f0f8ff',
+  // CSS system colors (light-scheme values; we map them like any other color)
+  graytext: '6d6d6d', canvas: 'ffffff', canvastext: '000000', buttonface: 'efefef', buttontext: '000000',
+  field: 'ffffff', fieldtext: '000000', linktext: '0000ee', highlight: '3584e4', highlighttext: 'ffffff',
 };
 
 export const NAMED_COLOR_WORDS = Object.keys(NAMED);

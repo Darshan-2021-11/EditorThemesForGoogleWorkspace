@@ -8,7 +8,13 @@ export interface ColorDecl {
   value: string;
   kind: ColorKind;
   important: boolean;
+  /** Custom property holding a bare "r,g,b" triple (used as rgba(var(--x-rgb), a)). */
+  triple?: boolean;
 }
+
+const TRIPLE_RE = /^\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*$/;
+/** rgba(var(--name, r, g, b), alpha) — Material 3's way of applying alpha to a theme color. */
+const VAR_RGB_RE = /\brgba?\(\s*var\(\s*(--[\w-]+)\s*(?:,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*)?\)\s*(?:,\s*([\d.]+%?)\s*)?\)/gi;
 
 export interface ColorRule {
   /** Wrapping at-rule preludes, e.g. ["@media (max-width: 600px)"]. */
@@ -41,7 +47,8 @@ export function kindForVariable(name: string, value: string): ColorKind | null {
   const c = parseColor(v);
   if (!c) return null;
   const n = name.toLowerCase();
-  if (/(^|-)on-(primary|secondary|tertiary|error|accent)/.test(n)) return 'onAccent';
+  // on-primary sits on a solid accent; on-primary-container/-fixed sit on pale tints (normal text)
+  if (/(^|-)on-(primary|secondary|tertiary|error|accent)(-rgb)?$/.test(n)) return 'onAccent';
   if (/(^|-)on-|text|foreground|(^|-)fg(-|$)|font|ink|icon|label|title|caption/.test(n)) return 'text';
   if (/outline|border|divider|stroke|separator|(^|-)line(-|$)|rule/.test(n)) return 'line';
   if (/surface|background|(^|-)bg(-|$)|container|fill|scrim|overlay|highlight|hover|state|tint|shadow|backdrop/.test(n)) return 'fill';
@@ -57,17 +64,39 @@ const COLOR_TOKEN = new RegExp(
 export function remapValue(value: string, kind: ColorKind, mapper: Mapper): string {
   return value
     .split(/(url\([^)]*\))/i)
-    .map((part, i) => (i % 2 ? part : part.replace(COLOR_TOKEN, (tok) => mapper.map(tok, kind))))
+    .map((part, i) => (i % 2 ? part : remapPart(part, kind, mapper)))
     .join('');
 }
 
-function hasColorToken(value: string): boolean {
-  COLOR_TOKEN.lastIndex = 0;
-  const parts = value.split(/url\([^)]*\)/i);
-  return parts.some((p) => {
-    COLOR_TOKEN.lastIndex = 0;
-    return COLOR_TOKEN.test(p);
+function remapPart(part: string, kind: ColorKind, mapper: Mapper): string {
+  // First rgba(var(--x-rgb, r, g, b), a): map the fallback triple and alpha, keep the var name
+  // (its definition is remapped separately as a triple).
+  const vars: string[] = [];
+  part = part.replace(VAR_RGB_RE, (m, name: string, r?: string, g?: string, b?: string, a?: string) => {
+    const alpha = a === undefined ? 1 : a.endsWith('%') ? parseFloat(a) / 100 : parseFloat(a);
+    let out = m;
+    if (r !== undefined) {
+      const c = parseColor(`rgba(${r}, ${g}, ${b}, ${alpha})`);
+      if (c) {
+        const mc = mapper.mapRGBA(c, kind);
+        out = `rgba(var(${name}, ${Math.round(mc.r)}, ${Math.round(mc.g)}, ${Math.round(mc.b)}), ${+mc.a.toFixed(3)})`;
+      }
+    } else if (kind === 'text' && alpha < 1) {
+      out = m.replace(/,\s*[\d.]+%?\s*\)$/, `, ${+mapper.mapRGBA({ r: 0, g: 0, b: 0, a: alpha }, kind).a.toFixed(3)})`);
+    }
+    vars.push(out);
+    return `\u0000${vars.length - 1}\u0000`;
   });
+  part = part.replace(COLOR_TOKEN, (tok) => mapper.map(tok, kind));
+  return part.replace(/\u0000(\d+)\u0000/g, (_, i: string) => vars[+i]);
+}
+
+/** Maps a custom property holding "r,g,b". */
+export function remapTriple(value: string, kind: ColorKind, mapper: Mapper): string {
+  const m = TRIPLE_RE.exec(value);
+  if (!m) return value;
+  const c = mapper.mapRGBA({ r: +m[1], g: +m[2], b: +m[3], a: 1 }, kind);
+  return `${Math.round(c.r)},${Math.round(c.g)},${Math.round(c.b)}`;
 }
 
 const ICON_SEL = /icon/i;
@@ -121,26 +150,69 @@ export function extractColorRules(rules: CSSRuleList, docHints: string[], wrappe
   return out;
 }
 
+/**
+ * Shorthands whose longhands read back empty when the value contains var() ("pending
+ * substitution"); for those we must remap the shorthand text itself.
+ */
+const SHORTHANDS: [string, ColorKind][] = [
+  ['background', 'fill'], ['border', 'line'], ['border-top', 'line'], ['border-right', 'line'],
+  ['border-bottom', 'line'], ['border-left', 'line'], ['border-color', 'line'], ['outline', 'line'],
+  ['border-block', 'line'], ['border-inline', 'line'], ['border-block-start', 'line'],
+  ['border-block-end', 'line'], ['border-inline-start', 'line'], ['border-inline-end', 'line'],
+];
+
+const urlOf = (v: string) => /url\(\s*["']?([^"')]+)/i.exec(v)?.[1];
+
+/**
+ * Whether an image URL on this rule is a monochrome UI glyph that should be inverted on dark
+ * themes. Colored artwork (logos, branding, photos, "color" sprites) is left alone.
+ */
+function isGlyphIcon(selector: string, url: string): boolean {
+  if (NOT_ICON_SEL.test(selector) || /colou?r|logo|branding|avatar|photo|emoji/i.test(url)) return false;
+  return /grey|gray|black|dark|mono/i.test(url) || ICON_SEL.test(selector) || /sprite|icon/i.test(url);
+}
+
+/**
+ * Every declaration of a color property is kept, even non-color values like `inherit`,
+ * `transparent` or `var(--x)`: the override sheet must reproduce the source's cascade order,
+ * otherwise a remapped early rule would beat a later `background: inherit` in the same sheet.
+ */
 export function extractStyleRule(selector: string, style: CSSStyleDeclaration, docHints: string[], wrappers: string[]): ColorRule | null {
   const decls: ColorDecl[] = [];
-  let bgImageUrl = false;
+  let imageUrl: string | undefined;
   let strongBg = false;
+  for (const [prop, kind] of SHORTHANDS) {
+    const value = style.getPropertyValue(prop);
+    if (!value || !value.includes('var(')) continue;
+    decls.push({ prop, value, kind, important: style.getPropertyPriority(prop) === 'important' });
+    if (prop === 'background') imageUrl ??= urlOf(value);
+  }
   for (let i = 0; i < style.length; i++) {
     const prop = style[i];
     const value = style.getPropertyValue(prop);
     if (!value) continue;
-    if (prop === 'background-image' && /url\(/i.test(value)) bgImageUrl = true;
+    if (prop === 'background-image' || prop === 'content') imageUrl ??= urlOf(value);
     let kind: ColorKind | null;
-    if (prop.startsWith('--')) kind = kindForVariable(prop, value);
-    else kind = hasColorToken(value) ? kindForProperty(prop) : null;
+    let triple = false;
+    if (prop.startsWith('--')) {
+      const t = TRIPLE_RE.exec(value);
+      triple = !!t;
+      kind = kindForVariable(prop, t ? `rgb(${t[1]},${t[2]},${t[3]})` : value);
+    } else kind = kindForProperty(prop);
     if (!kind) continue;
+    if (triple) {
+      decls.push({ prop, value, kind, important: style.getPropertyPriority(prop) === 'important', triple });
+      continue;
+    }
+    const varName = /^var\(\s*(--[\w-]+)/.exec(value)?.[1];
+    if (kind === 'text' && varName && kindForVariable(varName, '#ffffff') === 'onAccent') kind = 'onAccent';
     if (prop === 'background-color' && isStrongChromatic(value)) strongBg = true;
     decls.push({ prop, value, kind, important: style.getPropertyPriority(prop) === 'important' });
   }
   // White text on a solid accent background (buttons): text becomes the theme background color.
   if (strongBg) for (const d of decls) if (d.prop === 'color' && isLight(d.value)) d.kind = 'onAccent';
-  const icon = bgImageUrl && ICON_SEL.test(selector) && !NOT_ICON_SEL.test(selector);
-  if (!decls.length && !icon) return null;
+  const icon = !!imageUrl && isGlyphIcon(selector, imageUrl);
+  if (!icon && !decls.length) return null;
   return { wrappers, selector, decls, icon, doc: docHints.some((h) => selector.includes(h)) };
 }
 
@@ -152,8 +224,8 @@ export function renderRules(rules: ColorRule[], ui: Mapper | null, doc: Mapper |
     if (!m) continue;
     let body = '';
     for (const d of r.decls) {
-      const v = remapValue(d.value, d.kind, m);
-      if (v !== d.value) body += `${d.prop}:${v}${d.important ? ' !important' : ''};`;
+      const v = d.triple ? remapTriple(d.value, d.kind, m) : remapValue(d.value, d.kind, m);
+      body += `${d.prop}:${v}${d.important ? ' !important' : ''};`;
     }
     if (r.icon && iconFilter && !r.doc) body += 'filter:var(--wd-icon-filter) !important;';
     if (!body) continue;

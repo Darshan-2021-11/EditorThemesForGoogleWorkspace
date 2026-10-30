@@ -8,6 +8,8 @@ const root = fileURLToPath(new URL('..', import.meta.url));
 const dist = `${root}dist`;
 const watch = process.argv.includes('--watch');
 const run = process.argv.includes('--run');
+// Dev builds include a postMessage test bridge used by scripts/visual-test.mjs.
+const dev = watch || process.env.WD_DEV === '1';
 
 const entries = {
   background: 'src/background/index.ts',
@@ -29,6 +31,7 @@ for (const [name, entry] of Object.entries(entries)) {
     root,
     configFile: false,
     logLevel: 'warn',
+    define: { __WD_DEV__: JSON.stringify(dev) },
     build: {
       outDir: dist,
       emptyOutDir: false,

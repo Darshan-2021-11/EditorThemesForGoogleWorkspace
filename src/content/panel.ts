@@ -108,6 +108,7 @@ export class Panel {
   }
 
   importProgress(done: number, total: number) {
+    if (!this.importing) return;
     this.status = `Downloading ${done}/${total}…`;
     if (this.open) this.renderStatus();
   }

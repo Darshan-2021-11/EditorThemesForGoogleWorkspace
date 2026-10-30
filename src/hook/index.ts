@@ -22,6 +22,8 @@ interface CtxState {
 let mapper: Mapper | null = null;
 let semanticColors: { heading: string; code: string } | null = null;
 const states = new WeakMap<object, CtxState>();
+const debug = { active: false, configs: 0, calls: {} as Record<string, number> };
+if (__WD_DEV__) (window as unknown as { __wdHookDebug: typeof debug }).__wdHookDebug = debug;
 
 // ------------------------------------------------------------------------------------------
 // Semantic accents: classify text by font (headings by size relative to body text, code by family)
@@ -140,6 +142,7 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
       configurable: true,
       writable: true,
       value: function (this: Ctx2D, ...args: unknown[]) {
+        if (__WD_DEV__) debug.calls[name as string] = (debug.calls[name as string] ?? 0) + 1;
         before(this, args);
         return orig.apply(this, args);
       },
@@ -224,7 +227,11 @@ function configure(spec: ThemeSpec | null) {
       ? { heading: hex(ensureContrast(roles.heading, roles.bg, 4.5)), code: hex(ensureContrast(roles.code, roles.bg, 4.5)) }
       : null;
   }
-  // Ask the app to repaint its canvases with the new colors.
+  debug.active = !!mapper;
+  debug.configs++;
+  // Ask the app to repaint its canvases with the new colors. Docs re-renders its visible tiles
+  // on visibilitychange (resize/scroll/font events don't trigger a repaint).
+  document.dispatchEvent(new Event('visibilitychange'));
   window.dispatchEvent(new Event('resize'));
 }
 
