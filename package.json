@@ -1,0 +1,27 @@
+{
+  "name": "workspace-dark",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Code-editor themes (Base16/Base24) for the Google Docs, Sheets, Slides, Forms and Drive UI and document content. Firefox extension.",
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "dev": "node scripts/build.mjs --watch --run",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "lint:ext": "web-ext lint --source-dir dist",
+    "package": "node scripts/build.mjs && web-ext build --source-dir dist --artifacts-dir artifacts --overwrite-dest",
+    "fetch-schemes": "node scripts/fetch-schemes.ts"
+  },
+  "dependencies": {
+    "pdf-lib": "^1.17.1"
+  },
+  "devDependencies": {
+    "@types/firefox-webext-browser": "^120.0.4",
+    "typescript": "^5.9.3",
+    "vite": "^7.1.12",
+    "vitest": "^3.2.4",
+    "web-ext": "^8.10.0"
+  }
+}
