@@ -42,7 +42,8 @@ const sheets: AppProfile = {
   docRuleHints: ['waffle', 'grid4-inner-container', 'grid-container'],
   canvasDoc: true,
   keepColors: KEEP_COLORS,
-  docCss: (r) => `#waffle-grid-container, .grid4-inner-container { background-color: ${hex(r.bg)} !important; }`,
+  // Only layers *below* the grid canvas: .grid4-inner-container sits above it (z-index 3).
+  docCss: (r) => `#waffle-grid-container, .grid-container { background-color: ${hex(r.bg)} !important; }`,
   uiCss: () => '',
 };
 

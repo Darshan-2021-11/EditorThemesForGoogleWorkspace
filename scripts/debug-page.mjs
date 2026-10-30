@@ -27,8 +27,8 @@ try {
   await driver.installAddon('artifacts/wd-dev.zip', true);
   await driver.manage().setTimeouts({ script: 120000 });
   await driver.get(DOC);
-  await driver.wait(until.elementLocated(By.css('.kix-appview-editor')), 30000);
-  await driver.sleep(3000);
+  if (DOC.includes('/document/')) await driver.wait(until.elementLocated(By.css('.kix-appview-editor')), 30000);
+  await driver.sleep(DOC.includes('/document/') ? 3000 : 8000);
   const TT = 'https://github.com/tinted-theming/schemes/blob/spec-0.11';
   for (const f of new Set([ui, doc].filter((x) => x && x !== 'null'))) {
     const [sys, ...name] = f.split('-');
