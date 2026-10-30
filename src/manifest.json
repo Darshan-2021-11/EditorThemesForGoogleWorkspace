@@ -21,12 +21,7 @@
   "background": {
     "scripts": ["background.js"]
   },
-  "permissions": [
-    "unlimitedStorage",
-    "webRequest",
-    "webRequestBlocking",
-    "webRequestFilterResponse"
-  ],
+  "permissions": ["unlimitedStorage"],
   "host_permissions": [
     "https://docs.google.com/*",
     "https://drive.google.com/*",

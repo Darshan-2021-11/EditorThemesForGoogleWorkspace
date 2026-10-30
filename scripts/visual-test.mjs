@@ -79,6 +79,21 @@ try {
     await shot('8-file-menu', 1000);
   }
 
+  // Print: let Docs run its own print preparation (window.print stubbed so no dialog opens),
+  // then print the page to PDF with backgrounds OFF (the browser default) to prove the theme survives.
+  await driver.executeScript(() => document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  await bridge({ wdTest: 'set', ui: 'base16-nord', doc: 'base16-solarized-light' });
+  await driver.sleep(2000);
+  await driver.executeAsyncScript((done) => {
+    window.print = () => done(true);
+    const t = document.querySelector('.docs-texteventtarget-iframe')?.contentDocument?.activeElement || document.body;
+    t.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', code: 'KeyP', keyCode: 80, which: 80, ctrlKey: true, bubbles: true, cancelable: true }));
+    setTimeout(() => done(false), 20000);
+  });
+  const pdf = await driver.printPage({ background: false, pageRanges: ['1-2'] });
+  await writeFile(`${OUT}/print-solarized-light-doc.pdf`, pdf, 'base64');
+  console.log('printed', `${OUT}/print-solarized-light-doc.pdf`);
+
   await bridge({ wdTest: 'set', ui: null, doc: null });
   await shot('9-reverted');
   console.log('done →', OUT);

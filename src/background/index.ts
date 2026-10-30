@@ -6,7 +6,6 @@ import {
 import { GOOGLE_TAB_PATTERNS, pageKey } from '../shared/page';
 import { importFromUrl, slugify } from '../theme/scheme-import';
 import { DEFAULT_OPTIONS, type Scheme, type ThemeOptions, type ThemeSpec } from '../theme/types';
-import { installPrintInterceptor } from './print';
 
 // ------------------------------------------------------------------------------------------
 // In-memory cache over IndexedDB (rebuilt whenever the event page wakes up)
@@ -285,4 +284,5 @@ browser.commands.onCommand.addListener(async (command) => {
   if (command === 'toggle-theme') togglePage(tab.url!, tab.id);
 });
 
-installPrintInterceptor(resolvePage);
+// Printing needs nothing here: in Firefox, Docs prints its live (themed) editor via
+// window.print() with print-color-adjust: exact, so the printout matches the screen.

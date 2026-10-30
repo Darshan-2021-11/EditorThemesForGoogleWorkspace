@@ -14,9 +14,6 @@
     "package": "node scripts/build.mjs && web-ext build --source-dir dist --artifacts-dir artifacts --overwrite-dest",
     "visual-test": "node scripts/visual-test.mjs"
   },
-  "dependencies": {
-    "pdf-lib": "^1.17.1"
-  },
   "devDependencies": {
     "@types/firefox-webext-browser": "^120.0.4",
     "selenium-webdriver": "^4.52.0",
