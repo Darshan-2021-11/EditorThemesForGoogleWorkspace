@@ -1,6 +1,7 @@
 // Dev tool: WCAG contrast audit of themed Google apps (DOM text, Slides SVG text, canvas text).
 // Usage: node scripts/contrast-audit.mjs [set]   set = public (default) | private (needs PROFILE=<dir>)
-// Env: NO_BUILD=1 to reuse the last dev build, THEMES=base16-nord,... to override the theme list.
+// Env: NO_BUILD=1 to reuse the last dev build, THEMES=base16-nord,... to override the theme list,
+// APPS=slides,docs-home to audit only some pages of the set.
 // Writes artifacts/audit/<set>.json and prints a summary.
 import { Builder } from 'selenium-webdriver';
 import firefox from 'selenium-webdriver/firefox.js';
@@ -138,7 +139,9 @@ try {
   await driver.installAddon('artifacts/wd-dev.zip', true);
   await driver.manage().setTimeouts({ script: 120000 });
   let imported = false;
+  const only = process.env.APPS?.split(',');
   for (const [app, url] of Object.entries(SETS[set])) {
+    if (only && !only.includes(app)) continue;
     await driver.get(url);
     await driver.sleep(7000);
     if (!imported) {
@@ -149,7 +152,11 @@ try {
       imported = true;
     }
     for (const theme of THEMES) {
-      await bridge({ wdTest: 'set', theme });
+      const st = await bridge({ wdTest: 'set', theme });
+      if (st?.theme?.scheme?.id !== theme) {
+        console.log(`\n${app} / ${theme}: NOT APPLIED (import failed?)`);
+        continue;
+      }
       await driver.sleep(2500);
       // canvas audit: record while the app repaints with this theme
       await driver.executeScript('const d = window.__wdHookDebug; if (d) { d.audit = []; d.repaint(); }');

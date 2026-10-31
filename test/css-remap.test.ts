@@ -23,6 +23,12 @@ describe('css remapping', () => {
     expect(remapValue('url(white.png) #ffffff', 'fill', m)).toBe(`url(white.png) ${nord.palette.base00}`);
   });
 
+  it('never rewrites color words inside variable names', () => {
+    const v = remapValue('var(--ws-sys-color-extended-grey-fill,#5e5e5e)', 'text', m);
+    expect(v.startsWith('var(--ws-sys-color-extended-grey-fill,')).toBe(true);
+    expect(remapValue('var(--x-white-y) red', 'text', m)).toMatch(/^var\(--x-white-y\) #/);
+  });
+
   it('remaps var() fallbacks', () => {
     expect(remapValue('var(--gm3-sys-color-surface,#ffffff)', 'fill', m)).toBe(`var(--gm3-sys-color-surface,${nord.palette.base00})`);
   });
@@ -44,6 +50,8 @@ describe('css remapping', () => {
     expect(use.decls[0].kind).toBe('text');
     // surface-colored text stays matched to the surface (deliberately invisible input text)
     expect(extractStyleRule('.t', style({ color: 'var(--gm3-sys-color-surface)' }))!.decls[0].kind).toBe('fill');
+    // …but a "fill"-named grey used as text is ordinary text
+    expect(extractStyleRule('.t', style({ color: 'var(--ws-sys-color-extended-grey-fill,#5e5e5e)' }))!.decls[0].kind).toBe('text');
   });
 
   it('remaps the fallback of aliased component colors (Material buttons, dialogs)', () => {

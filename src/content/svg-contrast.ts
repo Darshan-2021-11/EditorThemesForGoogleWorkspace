@@ -94,9 +94,8 @@ export class ContrastFitter {
 const GEOMETRY = 'path, rect, ellipse, circle, polygon, image';
 /** Containers whose shapes are never painted where they stand. */
 const UNPAINTED = 'defs, clipPath, mask, pattern, marker, symbol';
-/** Slides' filmstrip thumbnails and the main editor: thumbnails take the editor's text-size decisions. */
+/** Slides' filmstrip thumbnails: text there is shown tiny. */
 const THUMBNAILS = '.punch-filmstrip-thumbnails';
-const EDITOR_SVG = '#pages svg';
 
 interface SvgInfo {
   layers: Layer[];
@@ -167,7 +166,16 @@ export class SvgTextContrast {
   private texts = new Map<Element, TextInfo | null>();
   private svgs = new Map<SVGSVGElement, SvgInfo>();
   private fills = new Map<string, RGBA | null>();
-  private editorScale: number | undefined;
+  /** Text measured before layout, to measure again shortly (bounded per element). */
+  private retry = new Set<Element>();
+  private attempts = new WeakMap<Element, number>();
+
+  /** Text that had no layout yet; the caller re-queues it after a short delay. */
+  takeRetries(): Element[] {
+    const out = [...this.retry];
+    this.retry.clear();
+    return out;
+  }
 
   constructor(private region: string) {}
 
@@ -208,7 +216,6 @@ export class SvgTextContrast {
     this.texts.clear();
     this.svgs.clear();
     this.fills.clear();
-    this.editorScale = undefined;
   }
 
   private measure(el: Element): TextInfo | null {
@@ -216,36 +223,25 @@ export class SvgTextContrast {
     const textEl = el.tagName.toLowerCase() === 'tspan' ? el.closest('text') : el;
     if (!svg || !textEl) return null;
     const r = el.getBoundingClientRect();
-    if (!r.width && !r.height) return null;
+    if (!r.width && !r.height) {
+      // not laid out yet (filmstrip thumbnails are built before they're shown): look again soon
+      const n = this.attempts.get(el) ?? 0;
+      if (n < 3) {
+        this.attempts.set(el, n + 1);
+        this.retry.add(el);
+      }
+      return null;
+    }
     const info = this.svgInfo(svg);
     const order = info.order.get(textEl);
     if (order === undefined) return null;
     const backdrop = backdropAt(info.layers, (r.left + r.right) / 2, (r.top + r.bottom) / 2, order, this.mapper!.roles.bg);
     if (!backdrop) return null;
-    // Size as shown in the main editor: thumbnails decide like the slide they preview.
-    let scale = ctmScale(el);
-    if (el.closest(THUMBNAILS) && info.scale) {
-      const editor = this.mainEditorScale();
-      if (editor) scale *= editor / info.scale;
-    }
+    // Thumbnails show text tiny: always the body-text target there.
+    if (el.closest(THUMBNAILS)) return { backdrop, target: 4.5 };
     const weight = fontProp(el, 'font-weight');
     const bold = weight === 'bold' || weight === 'bolder' || parseInt(weight, 10) >= 600;
-    return { backdrop, target: contrastTarget(fontPx(fontProp(el, 'font-size')) * scale, bold) };
-  }
-
-  private mainEditorScale(): number {
-    if (this.editorScale === undefined) {
-      this.editorScale = 0;
-      for (const svg of document.querySelectorAll(EDITOR_SVG)) {
-        if ((svg as SVGElement).ownerSVGElement) continue;
-        const s = ctmScale(svg);
-        if (s) {
-          this.editorScale = s;
-          break;
-        }
-      }
-    }
-    return this.editorScale;
+    return { backdrop, target: contrastTarget(fontPx(fontProp(el, 'font-size')) * ctmScale(el), bold) };
   }
 
   private svgInfo(svg: SVGSVGElement): SvgInfo {
@@ -276,6 +272,9 @@ export class SvgTextContrast {
     if (el.tagName.toLowerCase() === 'image') return null;
     let raw = '';
     for (let e: Element | null = el; e && !raw; e = e === svg ? null : e.parentElement) raw = paintProp(e, 'fill');
+    // Nothing inline: a stylesheet decides (text-box frames are fill:none by CSS). Rare, so the
+    // computed style is affordable here; assuming SVG's default black would fake a dark backdrop.
+    if (!raw) raw = getComputedStyle(el).fill;
     raw = raw.trim().toLowerCase() || 'black';
     if (raw === 'none') return { r: 0, g: 0, b: 0, a: 0 };
     let mapped = this.fills.get(raw);

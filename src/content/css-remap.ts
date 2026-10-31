@@ -97,8 +97,9 @@ export function withTextTwins(value: string): string {
   return out;
 }
 
+// Named colors only as whole words: "grey" inside --ws-sys-color-extended-grey-fill is a name part.
 const COLOR_TOKEN = new RegExp(
-  `#[0-9a-fA-F]{3,8}\\b|\\b(?:rgba?|hsla?)\\([^()]*\\)|\\b(?:${NAMED_COLOR_WORDS.join('|')})\\b`,
+  `#[0-9a-fA-F]{3,8}\\b|\\b(?:rgba?|hsla?)\\([^()]*\\)|(?<![\\w-])(?:${NAMED_COLOR_WORDS.join('|')})(?![\\w-])`,
   'gi',
 );
 
@@ -266,10 +267,12 @@ export function extractStyleRule(selector: string, style: CSSStyleDeclaration, w
     if (prop.startsWith('--')) {
       decls.push({ prop: twinName(prop), value, kind: 'text', important });
     } else if (kind === 'text' && value.includes('var(')) {
-      const vk = kindFromVariableName(/^var\(\s*(--[\w-]+)/.exec(value)?.[1] ?? '');
-      // Text painted in a surface color is deliberately invisible (e.g. Docs' title <input>,
-      // whose visible text is a separate label): keep it matching the surface.
-      if (vk === 'onAccent' || vk === 'fill') kind = vk;
+      const ref = /^var\(\s*(--[\w-]+)/.exec(value)?.[1] ?? '';
+      const vk = kindFromVariableName(ref);
+      // Text painted in the page surface color is deliberately invisible (e.g. Docs' title <input>,
+      // whose visible text is a separate label): keep it matching the surface. Other "fill" names
+      // (Google's extended-grey-fill) are ordinary text colors.
+      if (vk === 'onAccent' || (vk === 'fill' && /surface|background|(^|-)bg(-|$)/i.test(ref))) kind = vk;
       else if (ON_ACCENT_REF.test(value)) kind = 'onAccent';
       else v = withTextTwins(value);
     }

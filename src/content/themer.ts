@@ -285,7 +285,16 @@ export class PageThemer {
     // Layout reads for text backdrops all happen here, before any marker is written.
     if (this.svgText) els = this.svgText.prepare(els);
     for (const el of els) this.applyInline(el);
+    const retries = this.svgText?.takeRetries() ?? [];
     this.svgText?.end();
+    if (retries.length) {
+      // text not laid out yet: measure its backdrop again once it is shown
+      setTimeout(() => {
+        if (!this.active) return;
+        for (const t of retries) this.pending.add(t);
+        this.flushInline();
+      }, 400);
+    }
     if (this.restyleText) {
       // The deck's body size moved: headings told apart by size need another look.
       this.restyleText = false;
