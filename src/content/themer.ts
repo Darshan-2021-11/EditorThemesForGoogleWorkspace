@@ -4,10 +4,11 @@ import { ANSWER_EVENT, CONFIG_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQue
 import { formatColor, hex8, luminance, parseColor, type RGBA } from '../theme/color';
 import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles, type Roles } from '../theme/roles';
-import { styleColors } from '../theme/style-colors';
-import type { ColorKind, ThemeSpec } from '../theme/types';
+import { isInkColor, styleColors } from '../theme/style-colors';
+import type { ColorKind, StyleKey, ThemeSpec } from '../theme/types';
 import { extractColorRules, renderRules, type ColorRule } from './css-remap';
 import type { AppProfile } from './profiles';
+import type { ElementTextStyles } from './slide-styles';
 
 export const PANEL_HOST_ID = 'wd-panel-host';
 const OWN_ATTR = 'data-wd-own';
@@ -46,6 +47,11 @@ export class PageThemer {
   private mapper: Mapper | null = null;
   private roles: Roles | null = null;
   private spec: ThemeSpec | null = null;
+  /** Paragraph-style colors, when "color by paragraph style" is on. */
+  private styles: Record<StyleKey, string> | null = null;
+  /** Styles of document text drawn as elements (Slides), and whether its answers went stale. */
+  private textStyles: ElementTextStyles | null;
+  private restyleText = false;
   private sources = new Map<Element, SheetSource>();
   private pending = new Set<Element>();
   private crossOriginCache = new Map<string, Promise<string | null>>();
@@ -58,6 +64,7 @@ export class PageThemer {
   private paletteKind: ColorKind = 'text';
 
   constructor(private profile: AppProfile) {
+    this.textStyles = profile.textStyles?.(() => { this.restyleText = true; }) ?? null;
     // The hook may load after our first config; re-send when it announces itself.
     window.addEventListener(READY_EVENT, () => this.sendHookConfig());
     if (profile.docColorControls) {
@@ -102,6 +109,7 @@ export class PageThemer {
     this.spec = spec;
     this.roles = spec ? schemeToRoles(spec.scheme) : null;
     this.mapper = spec && this.roles ? createMapper(this.roles, spec.options) : null;
+    this.styles = spec?.options.styleColors ? styleColors(spec) : null;
     this.sendHookConfig();
     if (!this.active) return this.teardown();
     this.writeBase();
@@ -130,7 +138,7 @@ export class PageThemer {
         `html,body{background-color:${hex(r.bg)};}` +
         `::selection{background-color:${formatColor({ ...r.selection, a: 0.85 })};}` +
         this.profile.uiCss(r) +
-        this.profile.docCss(r, this.spec!.options, this.spec!.options.styleColors ? styleColors(this.spec!) : null);
+        this.profile.docCss(r, this.spec!.options, this.styles);
     }
     // Order doesn't matter for these: per-sheet overrides sit right after their source sheet and
     // inline/document rules are !important.
@@ -257,7 +265,14 @@ export class PageThemer {
     if (!this.pending.size) return;
     const els = [...this.pending];
     this.pending.clear();
+    this.textStyles?.invalidate();
     for (const el of els) this.applyInline(el);
+    if (this.restyleText) {
+      // The deck's body size moved: headings told apart by size need another look.
+      this.restyleText = false;
+      document.querySelectorAll(`:is(${this.profile.docRegion}) :is(text, tspan)`).forEach((t) => this.pending.add(t));
+      this.flushInline();
+    }
   }
 
   private applyInline(el: Element) {
@@ -283,8 +298,27 @@ export class PageThemer {
         this.queryIndicator(el, attr, prop, v);
         continue;
       }
+      if (read === 'fill' && kind === 'text' && inDoc && !useControl) {
+        const styled = this.styledTextColor(el, v);
+        if (styled) {
+          this.setInline(el, attr, prop, styled);
+          continue;
+        }
+      }
       this.setInline(el, attr, prop, m.mapRGBA(c, kind));
     }
+  }
+
+  /**
+   * Paragraph-style color for document text drawn as an element, as Docs' canvas text gets it:
+   * headings (and code) by their style whatever their color, default-ink body text as Normal
+   * text, and other colored text left to plain mapping (null).
+   */
+  private styledTextColor(el: Element, raw: string): RGBA | null {
+    if (!this.styles || !this.textStyles) return null;
+    const s = this.textStyles.styleOf(el);
+    const color = s ? this.styles[s] : isInkColor(raw) ? this.styles.normal : null;
+    return color ? parseColor(color) : null;
   }
 
   private setInline(el: Element, attr: string, prop: string, color: RGBA) {

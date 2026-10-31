@@ -95,6 +95,9 @@ export function lookup(index: ParagraphIndex, run: string): StyleKey[] | null {
   return index.full.get(t) ?? (t.length >= PREFIX ? index.prefix.get(t.slice(0, PREFIX)) ?? null : null);
 }
 
+/** Font families that mark code (painted with the "code" style color). */
+export const MONO_RE = /mono|courier|consolas|menlo|inconsolata|source code|fira code|cascadia|jetbrains/i;
+
 const pxOf = (font: string) => parseFloat(/(\d+(?:\.\d+)?)px/.exec(font)?.[1] ?? '0');
 
 /**

@@ -3,6 +3,7 @@ import { formatColor, type RGBA } from '../theme/color';
 import type { Roles } from '../theme/roles';
 import type { StyleKey, ThemeOptions } from '../theme/types';
 import type { AppId } from '../shared/page';
+import { SlideTextStyles, type ElementTextStyles } from './slide-styles';
 
 export interface AppProfile {
   app: AppId;
@@ -26,6 +27,11 @@ export interface AppProfile {
    * paragraph-style colors when "color by paragraph style" is on.
    */
   docCss(r: Roles, o: ThemeOptions, styles: Record<StyleKey, string> | null): string;
+  /**
+   * Paragraph styles of document text drawn as elements (Slides' SVG <text>), used for its fill
+   * when "color by paragraph style" is on. `onChange`: earlier answers may be stale.
+   */
+  textStyles?(onChange: () => void): ElementTextStyles;
   /** Extra UI CSS. */
   uiCss(r: Roles): string;
 }
@@ -78,6 +84,8 @@ const slides: AppProfile = {
   canvasDoc: false,
   keepColors: KEEP_COLORS,
   docCss: (_r, o) => (o.dimImages ? `:is(${SLIDE_SVG}) image { filter: brightness(${o.dimAmount}) !important; }` : ''),
+  // Speaker notes have their own sizes: they never set or take heading tiers.
+  textStyles: (onChange) => new SlideTextStyles('#pages svg, .punch-filmstrip-thumbnails', onChange),
   uiCss: () => '',
 };
 

@@ -7,7 +7,7 @@ import { schemeToRoles } from '../theme/roles';
 import { styleColors as computeStyleColors } from '../theme/style-colors';
 import type { ColorKind, StyleKey, ThemeSpec } from '../theme/types';
 import { ANSWER_EVENT, CONFIG_EVENT, DOC_STYLES_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
-import { buildIndex, parseExportHtml, parseStyleColors, StyleLearner, styleFromName } from './styles';
+import { buildIndex, MONO_RE, parseExportHtml, parseStyleColors, StyleLearner, styleFromName } from './styles';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 type Style = string | CanvasGradient | CanvasPattern;
@@ -36,7 +36,6 @@ if (__WD_DEV__) (window as unknown as { __wdHookDebug: typeof debug }).__wdHookD
 // ------------------------------------------------------------------------------------------
 // Paragraph-style colors
 
-const MONO_RE = /mono|courier|consolas|menlo|inconsolata|source code|fira code|cascadia|jetbrains/i;
 const LINK_COLORS = new Set(['#1155cc', '#0000ff', '#0000ee', '#1a0dab']);
 
 /** The style color for a run, or null to fall back to plain color mapping. */
@@ -327,35 +326,47 @@ function repaint() {
 }
 
 /**
- * Sheets ignores those events and blits old pixels when scrolling, so scroll each axis a full
- * screen away and back (about four frames): everything visible is drawn afresh.
+ * Sheets ignores a resize event when the viewport size is unchanged, so report a viewport 1px
+ * smaller for a moment: it re-lays out and redraws the whole visible grid, whatever its size.
  */
-let sheetsScrolling = false;
+async function fakeViewportResize() {
+  const frame = () => new Promise((r) => requestAnimationFrame(r));
+  const de = document.documentElement;
+  const fakes: [object, string, number][] = [
+    [window, 'innerWidth', window.innerWidth], [window, 'innerHeight', window.innerHeight],
+    [de, 'clientWidth', de.clientWidth], [de, 'clientHeight', de.clientHeight],
+  ];
+  // Some of these are own properties (Firefox keeps Window attributes on the instance): restore exactly.
+  const saved = fakes.map(([o, p]) => Object.getOwnPropertyDescriptor(o, p));
+  for (const [o, p, v] of fakes) Object.defineProperty(o, p, { configurable: true, get: () => v - 1 });
+  try {
+    window.dispatchEvent(new Event('resize'));
+    await frame(); await frame();
+    await new Promise((r) => setTimeout(r, 150));
+  } finally {
+    fakes.forEach(([o, p], i) => {
+      delete (o as Record<string, unknown>)[p];
+      if (saved[i]) Object.defineProperty(o, p, saved[i]!);
+    });
+  }
+  window.dispatchEvent(new Event('resize'));
+  await frame(); await frame();
+}
+
+let sheetsBusy = false;
 let sheetsAgain = false;
 async function repaintSheetsGrid() {
-  const sy = document.querySelector<HTMLElement>('.native-scrollbar-y');
-  const sx = document.querySelector<HTMLElement>('.native-scrollbar-x');
-  if (!sy && !sx) return;
-  if (sheetsScrolling) {
-    // a newer config arrived mid-bounce: repaint once more afterwards
+  if (!location.pathname.startsWith('/spreadsheets/') || window !== window.top) return;
+  if (sheetsBusy) {
+    // a newer config arrived mid-repaint: repaint once more afterwards
     sheetsAgain = true;
     return;
   }
-  sheetsScrolling = true;
-  const frame = () => new Promise((r) => requestAnimationFrame(r));
-  const bounce = async (el: HTMLElement | null, prop: 'scrollTop' | 'scrollLeft', size: number, max: number) => {
-    if (!el || max <= 0) return;
-    const at = el[prop];
-    el[prop] = at + size + 50 <= max ? at + size + 50 : Math.max(0, at - size - 50);
-    await frame(); await frame();
-    el[prop] = at;
-    await frame(); await frame();
-  };
+  sheetsBusy = true;
   try {
-    if (sy) await bounce(sy, 'scrollTop', sy.clientHeight, sy.scrollHeight - sy.clientHeight);
-    if (sx) await bounce(sx, 'scrollLeft', sx.clientWidth, sx.scrollWidth - sx.clientWidth);
+    await fakeViewportResize();
   } finally {
-    sheetsScrolling = false;
+    sheetsBusy = false;
   }
   if (sheetsAgain) {
     sheetsAgain = false;
