@@ -13,6 +13,7 @@ const TT = 'https://github.com/tinted-theming/schemes/blob/spec-0.11/base16';
 // `url`, or `home`: the app's home list, opening its first recent file (the user's template copy).
 const SHOTS = [
   { name: '1-sheets-nord-panel', theme: 'nord', url: 'https://docs.google.com/spreadsheets/d/1zJBmoxE33SaEGSu2uQzrcAHAH7go_tyjeldGhGRyT5I/edit', panel: true },
+  { name: '2-docs-solarized-light', theme: 'solarized-light', url: 'https://docs.google.com/document/d/1cqbrOHIpSTZ2bSss3-UgKF3NNeV7oCWulJ67NHjjV_M/edit' },
   { name: '3-slides-catppuccin', theme: 'catppuccin-mocha', home: 'https://docs.google.com/presentation/u/0/' },
   { name: '4-docs-home-gruvbox', theme: 'gruvbox-dark', url: 'https://docs.google.com/document/u/0/' },
   { name: '5-forms-tokyo-night', theme: 'tokyo-night-dark', url: 'https://docs.google.com/forms/d/e/1FAIpQLSe0CyA8X_wNkLGHZbWWwCA1HUVPSMONT6Bh531uaMuPJP_ojQ/viewform' },
