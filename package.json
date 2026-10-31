@@ -1,6 +1,6 @@
 {
   "name": "workspace-dark",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Code-editor themes (Base16/Base24) for the Google Docs, Sheets, Slides, Forms and Drive UI and document content. Firefox extension.",
   "type": "module",

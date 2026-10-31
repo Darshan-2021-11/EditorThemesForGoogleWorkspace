@@ -82,7 +82,7 @@ export class Panel {
       this.hostEl = h('div', { id: PANEL_HOST_ID });
       this.root = this.hostEl.attachShadow({ mode: 'closed' });
       this.root.append(h('style', {}, PANEL_CSS));
-      this.body = h('div', { class: 'panel', role: 'dialog', 'aria-label': 'Workspace Dark themes' });
+      this.body = h('div', { class: 'panel', role: 'dialog', 'aria-label': 'Editor Themes for Google Workspace' });
       this.root.append(this.body);
       this.root.addEventListener('keydown', (e) => {
         if ((e as KeyboardEvent).key === 'Escape') this.close();
@@ -144,7 +144,7 @@ export class Panel {
     ];
     this.body.replaceChildren(
       h('header', {},
-        h('div', { class: 'title' }, 'Workspace Dark'),
+        h('div', { class: 'title' }, 'Editor Themes'),
         h('button', { class: 'icon-btn', title: 'Close (Esc)', onclick: () => this.close() }, '✕'),
       ),
       h('nav', { role: 'tablist' },

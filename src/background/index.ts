@@ -291,7 +291,7 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
 
   async importBackup(req) {
     const d = req.data;
-    if (d?.format !== 'workspace-dark-backup') throw new Error('Not a Workspace Dark backup file');
+    if (d?.format !== 'workspace-dark-backup') throw new Error('Not an Editor Themes for Google Workspace backup file');
     await db.putMany('schemes', d.schemes ?? []);
     await db.putMany('options', d.options ?? []);
     await db.putMany('pages', d.pages ?? []);
