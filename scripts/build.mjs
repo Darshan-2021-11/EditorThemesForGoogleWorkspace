@@ -1,7 +1,7 @@
 // Builds each extension entry as a classic (IIFE) script into dist/.
 // Flags: --watch (rebuild on change), --run (also launch Firefox via web-ext with live reload).
 import { build } from 'vite';
-import { cp, mkdir, rm } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
@@ -28,12 +28,27 @@ async function copyStatic() {
 }
 await copyStatic();
 
+// The copyright notice travels with every copy of the built files. Prepended after writing: Vite's
+// library mode re-processes chunks and drops Rollup's `banner`.
+const copyrightBanner = {
+  name: 'wd-copyright-banner',
+  async writeBundle(options, bundle) {
+    for (const file of Object.keys(bundle)) {
+      if (!file.endsWith('.js')) continue;
+      const path = `${options.dir}/${file}`;
+      const code = await readFile(path, 'utf8');
+      if (!code.startsWith(BANNER)) await writeFile(path, `${BANNER}\n${code}`);
+    }
+  },
+};
+
 for (const [name, entry] of Object.entries(entries)) {
   await build({
     root,
     configFile: false,
     logLevel: 'warn',
     define: { __WD_DEV__: JSON.stringify(dev) },
+    plugins: [copyrightBanner],
     build: {
       outDir: dist,
       emptyOutDir: false,
@@ -42,8 +57,7 @@ for (const [name, entry] of Object.entries(entries)) {
       target: 'firefox128',
       watch: watch ? {} : null,
       lib: { entry: `${root}${entry}`, formats: ['iife'], name: `wd_${name}`, fileName: () => `${name}.js` },
-      // the copyright notice travels with every copy of the built files
-      rollupOptions: { output: { inlineDynamicImports: true, banner: BANNER } },
+      rollupOptions: { output: { inlineDynamicImports: true } },
     },
   });
 }
