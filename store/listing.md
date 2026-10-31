@@ -39,6 +39,13 @@ How to use
 
 One theme applies to all Google apps by default. Turn on "Separate theme per app" in Settings to pick one per app. Alt+Shift+D turns the theme on and off.
 
+## Screenshots (Edit Product Page → Images), in this order, with captions
+
+1. `store/screenshots/1-sheets-nord-panel.png`: "Google Sheets in Nord, with the theme panel: one color per paragraph style."
+2. `store/screenshots/3-slides-catppuccin.png`: "Google Slides in Catppuccin Mocha. Slides, shapes and thumbnails take the theme's colors."
+3. `store/screenshots/4-docs-home-gruvbox.png`: "Docs home in Gruvbox. Template and file previews show how the document will look."
+4. `store/screenshots/5-forms-tokyo-night.png`: "Google Forms in Tokyo Night."
+
 ## Categories
 
 - Appearance
