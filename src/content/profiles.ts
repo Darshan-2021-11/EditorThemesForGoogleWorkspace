@@ -2,7 +2,7 @@
 import { formatColor, type RGBA } from '../theme/color';
 import type { Roles } from '../theme/roles';
 import type { StyleKey, ThemeOptions } from '../theme/types';
-import type { AppId } from '../shared/page';
+import { isHomePage, type AppId } from '../shared/page';
 import { SlideTextStyles, type ElementTextStyles } from './slide-styles';
 
 export interface AppProfile {
@@ -34,6 +34,8 @@ export interface AppProfile {
   textStyles?(onChange: () => void): ElementTextStyles;
   /** Pictures inside the document (<img> or SVG <image>); flat graphics among them get recolored. */
   graphics: string;
+  /** Thumbnails of documents (home screens): shown the way the document looks when opened. */
+  thumbnails?: string;
   /** Extra UI CSS. */
   uiCss(r: Roles): string;
 }
@@ -134,7 +136,15 @@ const plain = (app: AppId): AppProfile => ({
   uiCss: () => '',
 });
 
-export function profileFor(app: AppId): AppProfile {
+// App home screens (Docs, Sheets, Slides, Forms): template previews and recent-file thumbnails
+// (an <img>, or a CSS background on the recent-file card).
+const home = (app: AppId): AppProfile => ({
+  ...plain(app),
+  thumbnails: '.docs-homescreen-templates-templateview-preview img, .docs-homescreen-grid-item-thumbnail',
+});
+
+export function profileFor(app: AppId, url = location.href): AppProfile {
+  if (app !== 'drive' && isHomePage(url)) return home(app);
   if (app === 'docs') return docs;
   if (app === 'sheets') return sheets;
   if (app === 'slides') return slides;

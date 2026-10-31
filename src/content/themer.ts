@@ -1,6 +1,6 @@
 // Applies one theme to the current frame: Google's interface and the document content.
 import { send } from '../shared/messages';
-import { ANSWER_EVENT, CONFIG_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
+import { ANSWER_EVENT, CONFIG_EVENT, CSSOM_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
 import { formatColor, hex8, luminance, parseColor, type RGBA } from '../theme/color';
 import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles, type Roles } from '../theme/roles';
@@ -43,6 +43,8 @@ function svgKind(el: Element, inDoc: boolean, base: ColorKind): ColorKind {
 interface SheetSource {
   rules: ColorRule[];
   override: HTMLStyleElement;
+  /** Rule count when parsed (-1: cross-origin, parsed from fetched text). */
+  count: number;
 }
 
 export class PageThemer {
@@ -69,11 +71,15 @@ export class PageThemer {
   private paletteKind: ColorKind = 'text';
 
   constructor(private profile: AppProfile) {
-    this.graphics = new GraphicRecolorer(profile.graphics);
+    this.graphics = new GraphicRecolorer(profile.graphics, profile.thumbnails);
     this.textStyles = profile.textStyles?.(() => { this.restyleText = true; }) ?? null;
     this.svgText = profile.textStyles && profile.docRegion ? new SvgTextContrast(profile.docRegion) : null;
     // The hook may load after our first config; re-send when it announces itself.
     window.addEventListener(READY_EVENT, () => this.sendHookConfig());
+    // A sheet the page filled through the CSSOM (no DOM mutation): rebuild its override.
+    document.addEventListener(CSSOM_EVENT, (e) => {
+      if (this.active && e.target instanceof Element) this.addSheetNode(e.target, true);
+    }, true);
     if (profile.docColorControls) {
       const note = (e: Event) => this.noteColorButton(e.target);
       document.addEventListener('pointerdown', note, true);
@@ -183,13 +189,39 @@ export class PageThemer {
       attributeFilter: ['style', 'fill', 'stroke', 'href', 'src'],
     });
     document.querySelectorAll('style, link[rel~="stylesheet"]').forEach((n) => this.addSheetNode(n));
+    // Safety net for sheets caught mid-parse at document_start: re-check rule counts a few times.
+    const recheck = () => this.recheckSheets();
+    document.addEventListener('DOMContentLoaded', recheck, { once: true });
+    window.addEventListener('load', recheck, { once: true });
+    setTimeout(recheck, 2000);
+    setTimeout(recheck, 6000);
+  }
+
+  /** Re-reads sheets that are new or whose rule count changed since they were parsed (cheap otherwise). */
+  private recheckSheets() {
+    if (!this.active) return;
+    document.querySelectorAll('style:not([data-wd-own]), link[rel~="stylesheet"]').forEach((n) => {
+      const src = this.sources.get(n);
+      if (!src) return void this.addSheetNode(n);
+      let count = -1;
+      try {
+        count = (n as HTMLStyleElement).sheet?.cssRules.length ?? -1;
+      } catch {
+        return; // cross-origin: parsed from fetched text, can't change underneath
+      }
+      if (count !== src.count) this.addSheetNode(n, true);
+    });
   }
 
   private onMutations(muts: MutationRecord[]) {
     for (const m of muts) {
       if (m.type === 'attributes') {
         if (m.attributeName === 'href' || m.attributeName === 'src') this.graphics.check(m.target as Element);
-        else this.pending.add(m.target as Element);
+        else {
+          this.pending.add(m.target as Element);
+          // thumbnails set as a CSS background often arrive after the card itself
+          if (m.attributeName === 'style' && this.profile.thumbnails) this.graphics.check(m.target as Element);
+        }
         continue;
       }
       const target = m.target as Node;
@@ -207,9 +239,10 @@ export class PageThemer {
         }
         this.pending.add(el);
         el.querySelectorAll('[style], [fill], [stroke]').forEach((d) => this.pending.add(d));
-        if (this.profile.graphics) {
+        const pics = [this.profile.graphics, this.profile.thumbnails].filter(Boolean).join(', ');
+        if (pics) {
           this.graphics.check(el);
-          el.querySelectorAll(this.profile.graphics).forEach((g) => this.graphics.check(g));
+          el.querySelectorAll(pics).forEach((g) => this.graphics.check(g));
         }
         el.querySelectorAll('style, link[rel~="stylesheet"]').forEach((s) => this.addSheetNode(s));
       });
@@ -236,8 +269,10 @@ export class PageThemer {
       return;
     }
     let rules: CSSRuleList | null = null;
+    let count = -1;
     try {
       rules = sheet.cssRules;
+      count = rules.length;
     } catch {
       const href = (node as HTMLLinkElement).href;
       if (!href || /fonts\.googleapis/.test(href)) return;
@@ -258,7 +293,7 @@ export class PageThemer {
     }
     const extracted = extractColorRules(rules);
     const prev = this.sources.get(node);
-    const src: SheetSource = { rules: extracted, override: prev?.override ?? this.ownStyle('sheet') };
+    const src: SheetSource = { rules: extracted, override: prev?.override ?? this.ownStyle('sheet'), count };
     this.sources.set(node, src);
     if (this.active) this.writeOverride(node, src);
   }

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { isFlatGraphic, lightOnDarkMask, recolorPixels } from '../src/theme/graphic';
+import {
+  isFlatGraphic, lightOnDarkMask, pageContext, recolorPixels, ZONE_PHOTO, ZONE_PLAIN, ZONE_TEXT,
+} from '../src/theme/graphic';
 
 function image(w: number, h: number, px: (x: number, y: number) => [number, number, number, number]) {
   const d = new Uint8ClampedArray(w * h * 4);
@@ -72,7 +74,39 @@ describe('lightOnDarkMask', () => {
   });
 });
 
+describe('pageContext', () => {
+  it('keeps photos, maps colored text on the page as text, shapes as plain', () => {
+    let seed = 3;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) % 256;
+    // 96x32: left third page with thin blue text lines, middle a solid orange block, right a photo
+    const d = image(96, 32, (x, y) => {
+      if (x < 32) return y % 4 === 0 ? [30, 80, 200, 255] : [255, 255, 255, 255];
+      if (x < 64) return [240, 120, 20, 255];
+      return [rnd(), rnd(), rnd(), 255];
+    });
+    const z = pageContext(d, 96, 32);
+    expect(z[16 * 96 + 8]).toBe(ZONE_TEXT);
+    expect(z[16 * 96 + 44]).toBe(ZONE_PLAIN);
+    expect(z[16 * 96 + 88]).toBe(ZONE_PHOTO);
+  });
+
+  it('anti-aliased colored text (tints between ink and white) is text, not photo', () => {
+    // a heading: blue ink with every tint toward white, on the page
+    const d = image(32, 16, (x) => {
+      const t = (x % 16) / 15;
+      return [Math.round(30 + t * 225), Math.round(80 + t * 175), Math.round(200 + t * 55), 255];
+    });
+    expect(pageContext(d, 32, 16)[8 * 32 + 4]).not.toBe(ZONE_PHOTO);
+  });
+});
+
 describe('recolorPixels', () => {
+  it('leaves photo pixels untouched', () => {
+    const d = new Uint8ClampedArray([10, 20, 30, 255]);
+    recolorPixels(d, () => 0xffffff, new Int32Array([ZONE_PHOTO]));
+    expect([...d]).toEqual([10, 20, 30, 255]);
+  });
+
   it('maps each color once, keeps alpha and skips transparent pixels', () => {
     const d = new Uint8ClampedArray([255, 255, 255, 255, 255, 255, 255, 128, 9, 9, 9, 0]);
     let calls = 0;

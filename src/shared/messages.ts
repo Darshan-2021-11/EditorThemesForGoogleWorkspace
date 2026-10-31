@@ -7,16 +7,24 @@ export interface GlobalSettings {
   defaultTheme: string | null;
   /** Most recently picked theme; used by the on/off shortcut. */
   lastTheme: string | null;
+  /** Each app (Docs, Sheets, …, Drive) keeps its own theme; otherwise one theme covers them all. */
+  separateApps: boolean;
 }
 
 export const DEFAULT_SETTINGS: GlobalSettings = {
-  id: 'global', autoApply: false, defaultTheme: null, lastTheme: null,
+  id: 'global', autoApply: false, defaultTheme: null, lastTheme: null, separateApps: false,
 };
 
-/** Remembered theme choice for one page (null = theme off). One theme covers UI and document. */
+/**
+ * A record in the `pages` store. Two kinds share it:
+ * - `suite:*` (every Google app) or `suite:<suite>` (one app, see suiteKey; used when
+ *   separateApps is on): a theme choice (null = theme off). One theme covers UI and document.
+ * - a pageKey (`document:<id>`, …): that document's own data (style colors). Records written
+ *   before themes were per suite also carry a `theme`; it was adopted by the suite and is ignored.
+ */
 export interface PageSetting {
   key: string;
-  theme: string | null;
+  theme?: string | null;
   updated: number;
   /** The document's named-style colors when last seen (raw Docs colors). */
   docStyles?: Partial<Record<StyleKey, string>>;
@@ -26,6 +34,8 @@ export interface PageSetting {
 
 export interface PageState {
   key: string;
+  /** What a theme choice here applies to: '*' (every Google app) or a suite (see suiteKey). */
+  scope: string;
   /** Theme with this page's style overrides already merged into options.styleSlots. */
   theme: ThemeSpec | null;
   /** Which styles follow a color the user picked in the document. */

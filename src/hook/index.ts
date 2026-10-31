@@ -6,7 +6,9 @@ import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles } from '../theme/roles';
 import { styleColors as computeStyleColors } from '../theme/style-colors';
 import type { ColorKind, StyleKey, ThemeSpec } from '../theme/types';
-import { ANSWER_EVENT, CONFIG_EVENT, DOC_STYLES_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
+import {
+  ANSWER_EVENT, CONFIG_EVENT, CSSOM_EVENT, DOC_STYLES_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery,
+} from '../shared/hook-protocol';
 import { buildIndex, MONO_RE, parseExportHtml, parseStyleColors, StyleLearner, styleFromName } from './styles';
 import { PairContrast, parseFont, RectStore, textTarget } from './contrast-pairs';
 
@@ -408,6 +410,32 @@ function isPicture(src: unknown): boolean {
 
 patch(CanvasRenderingContext2D.prototype);
 if (typeof OffscreenCanvasRenderingContext2D !== 'undefined') patch(OffscreenCanvasRenderingContext2D.prototype);
+
+// Stylesheets filled from script (Google's one-bar uses insertRule) change without DOM mutations:
+// tell the content script so its override for that sheet is rebuilt (once per sheet per burst).
+const changedSheets = new Set<Node>();
+function sheetChanged(sheet: CSSStyleSheet) {
+  const node = sheet.ownerNode as Element | null;
+  if (!node || changedSheets.has(node) || node.hasAttribute?.('data-wd-own')) return;
+  changedSheets.add(node);
+  setTimeout(() => {
+    changedSheets.delete(node);
+    node.dispatchEvent(new Event(CSSOM_EVENT, { bubbles: true }));
+  }, 50);
+}
+for (const name of ['insertRule', 'deleteRule', 'replace', 'replaceSync'] as const) {
+  const orig = CSSStyleSheet.prototype[name] as (...a: unknown[]) => unknown;
+  if (typeof orig !== 'function') continue;
+  Object.defineProperty(CSSStyleSheet.prototype, name, {
+    configurable: true,
+    writable: true,
+    value: function (this: CSSStyleSheet, ...args: unknown[]) {
+      const r = orig.apply(this, args);
+      sheetChanged(this);
+      return r;
+    },
+  });
+}
 
 const addColorStop = CanvasGradient.prototype.addColorStop;
 CanvasGradient.prototype.addColorStop = function (offset: number, color: string) {

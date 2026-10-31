@@ -1,5 +1,6 @@
 // The in-page theme panel (closed Shadow DOM, so Google's CSS can't reach it).
 import { send, type GlobalSettings, type PageState, type PanelTab } from '../shared/messages';
+import { scopeName } from '../shared/page';
 import { formatColor, type RGBA } from '../theme/color';
 import { schemeToRoles } from '../theme/roles';
 import { SUGGESTED_SOURCES } from '../theme/scheme-import';
@@ -166,7 +167,7 @@ export class Panel {
 
   private renderTab(state: PageState): Node {
     switch (this.tab) {
-      case 'theme': return this.renderPicker(state.theme);
+      case 'theme': return this.renderPicker(state.theme, state.scope);
       case 'library': return this.renderLibrary();
       case 'custom': return this.renderCustom(state);
       case 'settings': return this.renderSettings(state);
@@ -175,7 +176,7 @@ export class Panel {
 
   // ---- Theme picker -----------------------------------------------------------------------
 
-  private renderPicker(current: ThemeSpec | null): Node {
+  private renderPicker(current: ThemeSpec | null, scope: string): Node {
     const wrap = h('div', { class: 'picker' });
     if (!this.schemes.length) {
       wrap.append(
@@ -187,7 +188,7 @@ export class Panel {
     wrap.append(
       h('div', { class: 'current' },
         h('div', {},
-          h('div', { class: 'label' }, 'Interface and document'),
+          h('div', { class: 'label', title: 'One theme covers the interface and the document' }, scopeName(scope)),
           h('div', { class: 'name' }, current ? current.scheme.name : 'Off — Google default'),
         ),
         current && h('button', { class: 'btn', onclick: () => this.choose(null) }, 'Turn off'),
@@ -521,7 +522,11 @@ export class Panel {
     return h('div', { class: 'settings' },
       h('label', { class: 'check big' },
         h('input', { type: 'checkbox', checked: s.autoApply, onchange: (e: Event) => patch({ autoApply: (e.target as HTMLInputElement).checked }) }),
-        h('span', {}, h('b', {}, 'Auto-apply everywhere'), h('br'), h('span', { class: 'hint' }, 'Use the default theme on every Google page you haven’t set individually.')),
+        h('span', {}, h('b', {}, 'Auto-apply everywhere'), h('br'), h('span', { class: 'hint' }, 'Use the default theme wherever you haven’t picked one yet.')),
+      ),
+      h('label', { class: 'check big' },
+        h('input', { type: 'checkbox', checked: s.separateApps, onchange: (e: Event) => patch({ separateApps: (e.target as HTMLInputElement).checked }) }),
+        h('span', {}, h('b', {}, 'Separate theme per app'), h('br'), h('span', { class: 'hint' }, 'Docs, Sheets, Slides, Forms, Drawings and Drive each keep their own theme; off = one theme for all.')),
       ),
       h('div', { class: 'card' },
         h('div', {}, 'Default theme: ', h('b', {}, nameOf(s.defaultTheme))),
@@ -529,8 +534,8 @@ export class Panel {
           h('button', {
             class: 'btn', disabled: !state.theme,
             onclick: () => patch({ defaultTheme: state.theme?.scheme.id ?? s.defaultTheme }),
-          }, 'Use this page’s theme as default'),
-          h('button', { class: 'btn', disabled: !state.theme, onclick: () => send({ type: 'setPageTheme', theme: null }) }, 'Revert this page to Google’s look'),
+          }, 'Use the current theme as default'),
+          h('button', { class: 'btn', disabled: !state.theme, onclick: () => send({ type: 'setPageTheme', theme: null }) }, `Revert ${scopeName(state.scope).replace(/^All/, 'all')} to Google’s look`),
         ),
       ),
       h('div', { class: 'card' },
@@ -553,7 +558,7 @@ export class Panel {
         ),
       ),
       h('div', { class: 'card hint' },
-        h('div', {}, h('kbd', {}, 'Alt+Shift+D'), ' theme on/off for this page'),
+        h('div', {}, h('kbd', {}, 'Alt+Shift+D'), ' theme on/off (' + scopeName(state.scope).replace(/^All/, 'all') + ')'),
         h('div', {}, h('kbd', {}, 'Alt+Shift+T'), ' open this panel'),
         h('div', {}, 'Change shortcuts in about:addons → ⚙ → Manage Extension Shortcuts.'),
         h('div', {}, 'Everything is stored locally in this browser. Nothing is saved to Google.'),

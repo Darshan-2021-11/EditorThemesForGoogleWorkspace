@@ -154,6 +154,79 @@ export interface LightOnDark {
   pairs: { mark: number; shape: number; shapeBucket: number }[];
 }
 
+/** Pixel roles from page context (see pageContext). */
+export const ZONE_PLAIN = -1;
+export const ZONE_PHOTO = -2;
+export const ZONE_TEXT = -3;
+
+/**
+ * Per-pixel context in a picture of a document page (home-screen thumbnails), from 8×8 blocks in
+ * one linear pass: ZONE_PHOTO where a block holds many distinct colors (photos: left as they are),
+ * ZONE_TEXT where colored pixels sit on mostly page white (headings, links: mapped like text),
+ * ZONE_PLAIN elsewhere (shapes, fills). Photo blocks grow by one block so photo edges stay whole.
+ */
+export function pageContext(data: Uint8Array | Uint8ClampedArray, width: number, height: number): Int32Array {
+  const B = 8;
+  const bw = Math.ceil(width / B), bh = Math.ceil(height / B);
+  const photo = new Uint8Array(bw * bh);
+  const textish = new Uint8Array(bw * bh);
+  for (let by = 0; by < bh; by++) {
+    for (let bx = 0; bx < bw; bx++) {
+      const y0 = by * B, y1 = Math.min(height, y0 + B), x0 = bx * B, x1 = Math.min(width, x0 + B);
+      // ink: the pixel farthest from white. Text and flat art (with their anti-aliasing) lie on the
+      // line from white to their ink; photos scatter off it.
+      let white = 0, n = 0, ink = -1, far = -1;
+      for (let y = y0; y < y1; y++) {
+        for (let x = x0; x < x1; x++) {
+          const i = (y * width + x) * 4;
+          if (data[i + 3] < 16) continue;
+          n++;
+          if (data[i] > 235 && data[i + 1] > 235 && data[i + 2] > 235) white++;
+          const d = (255 - data[i]) ** 2 + (255 - data[i + 1]) ** 2 + (255 - data[i + 2]) ** 2;
+          if (d > far) { far = d; ink = i; }
+        }
+      }
+      let off = 0;
+      if (ink >= 0 && far > 0) {
+        const ir = data[ink] - 255, ig = data[ink + 1] - 255, ib = data[ink + 2] - 255;
+        for (let y = y0; y < y1; y++) {
+          for (let x = x0; x < x1; x++) {
+            const i = (y * width + x) * 4;
+            if (data[i + 3] < 16) continue;
+            const pr = data[i] - 255, pg = data[i + 1] - 255, pb = data[i + 2] - 255;
+            const t = Math.min(1, Math.max(0, (pr * ir + pg * ig + pb * ib) / far));
+            const er = pr - t * ir, eg = pg - t * ig, eb = pb - t * ib;
+            if (er * er + eg * eg + eb * eb > 28 * 28) off++;
+          }
+        }
+      }
+      const k = by * bw + bx;
+      const whiteShare = n ? white / n : 1;
+      photo[k] = n && off / n > 0.3 ? 1 : 0;
+      textish[k] = whiteShare >= 0.5 ? 1 : 0;
+    }
+  }
+  const zone = new Int32Array(width * height);
+  for (let y = 0; y < height; y++) {
+    const by = (y / B) | 0;
+    for (let x = 0; x < width; x++) {
+      const bx = (x / B) | 0;
+      const i = (y * width + x) * 4;
+      // the margin around a photo keeps the photo's pixels but not the page white beside it
+      const pageWhite = data[i] > 235 && data[i + 1] > 235 && data[i + 2] > 235;
+      let ph = photo[by * bw + bx] === 1;
+      for (let dy = -1; dy <= 1 && !ph && !pageWhite; dy++) {
+        for (let dx = -1; dx <= 1 && !ph; dx++) {
+          const yy = by + dy, xx = bx + dx;
+          if (yy >= 0 && xx >= 0 && yy < bh && xx < bw && photo[yy * bw + xx]) ph = true;
+        }
+      }
+      zone[y * width + x] = ph ? ZONE_PHOTO : textish[by * bw + bx] ? ZONE_TEXT : ZONE_PLAIN;
+    }
+  }
+  return zone;
+}
+
 /**
  * Recolors pixels in place. `map` gets each distinct opaque-ish color once per zone (see
  * LightOnDark; -1 without one) and returns the replacement as a packed 0xRRGGBB; alpha is kept so
@@ -168,6 +241,7 @@ export function recolorPixels(
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] === 0) continue;
     const z = zone ? zone[i >> 2] : -1;
+    if (z === ZONE_PHOTO) continue;
     const key = (z + 1) * 0x1000000 + ((data[i] << 16) | (data[i + 1] << 8) | data[i + 2]);
     let out = cache.get(key);
     if (out === undefined) {

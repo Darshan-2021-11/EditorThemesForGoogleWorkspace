@@ -16,6 +16,11 @@ export const QUERY_EVENT = 'wd-hook-query';
 /** hook → content: the document's named-style colors were read. detail = JSON Record<StyleKey, hex> */
 export const DOC_STYLES_EVENT = 'wd-hook-doc-styles';
 export const ANSWER_EVENT = 'wd-hook-answer';
+/**
+ * Fired (bubbling) on a <style>/<link> whose sheet the page changed through the CSSOM
+ * (insertRule & co.): no DOM mutation tells the content script, which must re-read it.
+ */
+export const CSSOM_EVENT = 'wd-hook-cssom';
 
 export interface TextColorQuery {
   id: number;

@@ -28,7 +28,7 @@ const bridge = (cmd) =>
 try {
   await driver.installAddon('artifacts/wd-dev.zip', true);
   await driver.manage().setTimeouts({ script: 120000 });
-  await driver.get(DOC);
+  await driver.get(process.env.SET_ON || DOC);
   const editor = /\/document\/(u\/\d+\/)?d\//.test(DOC);
   if (editor) await driver.wait(until.elementLocated(By.css('.kix-appview-editor')), 30000);
   await driver.sleep(editor ? 3000 : 8000);
@@ -39,6 +39,11 @@ try {
   }
   await bridge({ wdTest: 'set', theme: theme === 'null' ? null : theme });
   await driver.sleep(2500);
+  // SET_ON=<url>: the theme was picked on another page; open DOC without picking (shared theme check).
+  if (process.env.SET_ON) {
+    await driver.get(DOC);
+    await driver.sleep(8000);
+  }
   // RELOAD=1: reload so the remembered theme applies from first paint.
   if (process.env.RELOAD) {
     await driver.navigate().refresh();

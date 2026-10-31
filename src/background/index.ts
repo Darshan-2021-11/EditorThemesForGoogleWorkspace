@@ -3,7 +3,8 @@ import {
   DEFAULT_SETTINGS, type BackupFile, type GlobalSettings, type PageSetting, type PageState, type Push,
   type Request, type ResponseMap, type SchemeOptionsRecord,
 } from '../shared/messages';
-import { GOOGLE_TAB_PATTERNS, pageKey } from '../shared/page';
+import { ALL_APPS, GOOGLE_TAB_PATTERNS, SUITES, pageKey, suiteKey } from '../shared/page';
+import { migrateThemes, themeRecordKey } from '../storage/migrate';
 import { importFromUrl, slugify } from '../theme/scheme-import';
 import { isInkColor, styleValueForDocColor } from '../theme/style-colors';
 import {
@@ -30,12 +31,18 @@ function cache(): Promise<Cache> {
       db.getAll<PageSetting>('pages'),
       db.get<GlobalSettings>('settings', 'global'),
     ]);
-    return {
+    const c: Cache = {
       schemes: new Map(schemes.map((s) => [s.id, s])),
       options: new Map(options.map(({ id, ...o }) => [id, o])),
       pages: new Map(pages.map((p) => [p.key, migratePage(p)])),
       settings: migrateSettings(settings),
     };
+    // per-document theme choices (older versions) → all-apps and per-suite themes
+    const adopted = migrateThemes(c.pages.values());
+    for (const p of adopted) c.pages.set(p.key, p);
+    // a failed write is retried next time the event page wakes (the migration is idempotent)
+    if (adopted.length) await db.putMany('pages', adopted).catch(() => {});
+    return c;
   })();
   return cachePromise;
 }
@@ -45,7 +52,8 @@ type Legacy = { ui?: string | null; doc?: string | null; defaultUi?: string | nu
 
 function migratePage(p: PageSetting & Legacy): PageSetting {
   const { ui, doc, ...rest } = p;
-  return { ...rest, theme: p.theme !== undefined ? p.theme : doc ?? ui ?? null };
+  if (p.theme !== undefined || !('ui' in p || 'doc' in p)) return rest;
+  return { ...rest, theme: doc ?? ui ?? null };
 }
 
 function migrateSettings(s: (GlobalSettings & Legacy) | undefined): GlobalSettings {
@@ -54,6 +62,7 @@ function migrateSettings(s: (GlobalSettings & Legacy) | undefined): GlobalSettin
     autoApply: s?.autoApply ?? false,
     defaultTheme: s?.defaultTheme ?? s?.defaultDoc ?? s?.defaultUi ?? null,
     lastTheme: s?.lastTheme ?? s?.lastDoc ?? s?.lastUi ?? null,
+    separateApps: s?.separateApps ?? false,
   };
 }
 
@@ -68,36 +77,71 @@ function spec(c: Cache, id: string | null): ThemeSpec | null {
   return { scheme, options: { ...DEFAULT_OPTIONS, ...c.options.get(scheme.id) } };
 }
 
-/** The scheme id in effect for a page: remembered choice, else the default when auto-apply is on. */
-function effective(c: Cache, key: string): string | null {
-  const p = c.pages.get(key);
-  if (p) return p.theme;
+/** What a theme choice on this page applies to: every Google app, or (separateApps) its suite. */
+function scopeOf(c: Cache, url: string): string {
+  return c.settings.separateApps ? suiteKey(url) : ALL_APPS;
+}
+
+/** The scheme id in effect for a scope: remembered choice, else the default when auto-apply is on. */
+function effective(c: Cache, scope: string): string | null {
+  const p = c.pages.get(themeRecordKey(scope));
+  if (p) return p.theme ?? null;
   return c.settings.autoApply ? c.settings.defaultTheme : null;
 }
 
 export async function resolvePage(url: string): Promise<PageState> {
   const c = await cache();
   const key = pageKey(url);
+  const scope = scopeOf(c, url);
   const overrides = c.pages.get(key)?.styleOverrides ?? {};
-  let theme = spec(c, effective(c, key));
+  let theme = spec(c, effective(c, scope));
   if (theme) {
     const styleSlots = { ...DEFAULT_STYLE_SLOTS, ...theme.options.styleSlots, ...overrides };
     theme = { ...theme, options: { ...theme.options, styleSlots } };
   }
-  return { key, theme, styleOverrides: overrides, hasSchemes: c.schemes.size > 0 };
+  return { key, scope, theme, styleOverrides: overrides, hasSchemes: c.schemes.size > 0 };
 }
 
-/** Updates a page record, keeping fields not in `patch` (theme, remembered style colors). */
-async function patchPage(key: string, patch: Partial<Omit<PageSetting, 'key'>>) {
+/**
+ * Updates a document's record, keeping fields not in `patch` (remembered style colors). A
+ * per-document theme from older versions was adopted when the cache loaded, so it is dropped.
+ */
+async function patchPage(key: string, patch: Partial<Omit<PageSetting, 'key' | 'theme'>>) {
   const c = await cache();
-  const prev = c.pages.get(key);
-  const rec: PageSetting = { theme: effective(c, key), ...prev, ...patch, key, updated: Date.now() };
+  const { theme: _adopted, ...prev } = c.pages.get(key) ?? {};
+  const rec: PageSetting = { ...prev, ...patch, key, updated: Date.now() };
   c.pages.set(key, rec);
   await db.put('pages', rec);
 }
 
-async function savePage(key: string, theme: string | null) {
-  await patchPage(key, { theme });
+/** Remembers the theme for a scope (ALL_APPS or a suite). */
+async function saveTheme(scope: string, theme: string | null) {
+  const c = await cache();
+  const rec: PageSetting = { key: themeRecordKey(scope), theme, updated: Date.now() };
+  c.pages.set(rec.key, rec);
+  await db.put('pages', rec);
+}
+
+/**
+ * Switching "Separate theme per app": turning it on starts every app from the all-apps theme;
+ * turning it off makes the theme of the tab where it was switched the one for all apps.
+ */
+async function switchSeparateApps(on: boolean, url?: string) {
+  const c = await cache();
+  if (on) {
+    const all = c.pages.get(themeRecordKey(ALL_APPS));
+    for (const s of SUITES) {
+      const key = themeRecordKey(s);
+      // no all-apps choice yet: apps follow auto-apply like before
+      if (all) await saveTheme(s, all.theme ?? null);
+      else if (c.pages.delete(key)) await db.delete('pages', key);
+    }
+  } else if (url) {
+    const tabs = c.pages.get(themeRecordKey(suiteKey(url)));
+    const allKey = themeRecordKey(ALL_APPS);
+    if (tabs) await saveTheme(ALL_APPS, tabs.theme ?? null);
+    else if (c.pages.delete(allKey)) await db.delete('pages', allKey);
+  }
 }
 
 async function saveSettings(patch: Partial<GlobalSettings>) {
@@ -118,11 +162,16 @@ function push(tabId: number, msg: Push, frameId?: number) {
   return browser.tabs.sendMessage(tabId, msg, frameId === undefined ? undefined : { frameId }).catch(() => {});
 }
 
-/** Re-sends the resolved state to every open Google tab (optionally only those showing `key`). */
-async function broadcastState(onlyKey?: string) {
+/**
+ * Re-sends the resolved state to every open Google tab, optionally only those showing document
+ * `key` or sharing theme scope `scope` (ALL_APPS = every tab).
+ */
+async function broadcastState(only?: { key?: string; scope?: string }) {
+  const c = await cache();
   for (const tab of await googleTabs()) {
     if (tab.id === undefined || !tab.url) continue;
-    if (onlyKey && pageKey(tab.url) !== onlyKey) continue;
+    if (only?.key && pageKey(tab.url) !== only.key) continue;
+    if (only?.scope && only.scope !== ALL_APPS && scopeOf(c, tab.url) !== only.scope) continue;
     push(tab.id, { type: 'applyState', state: await resolvePage(tab.url) });
   }
 }
@@ -148,10 +197,10 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
 
   async setPageTheme(req, sender) {
     const c = await cache();
-    const key = pageKey(sender.tab!.url!);
-    await savePage(key, req.theme);
+    const scope = scopeOf(c, sender.tab!.url!);
+    await saveTheme(scope, req.theme);
     if (req.theme) await saveSettings({ lastTheme: req.theme, defaultTheme: c.settings.defaultTheme ?? req.theme });
-    await broadcastState(key);
+    await broadcastState({ scope });
     return resolvePage(sender.tab!.url!);
   },
 
@@ -218,7 +267,10 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
     return (await cache()).settings;
   },
 
-  async setSettings(req) {
+  async setSettings(req, sender) {
+    const c = await cache();
+    const separate = req.patch.separateApps;
+    if (separate !== undefined && separate !== c.settings.separateApps) await switchSeparateApps(separate, sender.tab?.url);
     const s = await saveSettings(req.patch);
     await broadcastState();
     return s;
@@ -263,7 +315,7 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
     const before = page?.docStyles;
     const overrides = { ...page?.styleOverrides };
     let changed = false;
-    const theme = spec(c, effective(c, key));
+    const theme = spec(c, effective(c, scopeOf(c, sender.tab!.url!)));
     if (before && theme) {
       for (const k of STYLE_KEYS) {
         const now = req.colors[k];
@@ -287,14 +339,14 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
     if (!before || changed || JSON.stringify(before) !== JSON.stringify(req.colors)) {
       await patchPage(key, { docStyles: req.colors, styleOverrides: overrides });
     }
-    if (changed) await broadcastState(key);
+    if (changed) await broadcastState({ key });
   },
 
   /** A color picked in the panel: becomes the theme's color for that style, and replaces this page's override. */
   async setStyleSlot(req, sender) {
     const c = await cache();
     const key = pageKey(sender.tab!.url!);
-    const id = effective(c, key);
+    const id = effective(c, scopeOf(c, sender.tab!.url!));
     if (!id) return;
     const options = { ...DEFAULT_OPTIONS, ...c.options.get(id) };
     options.styleSlots = { ...DEFAULT_STYLE_SLOTS, ...options.styleSlots, [req.style]: req.value };
@@ -311,7 +363,7 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
   async resetStyleColors(_req, sender) {
     const c = await cache();
     const key = pageKey(sender.tab!.url!);
-    const id = effective(c, key);
+    const id = effective(c, scopeOf(c, sender.tab!.url!));
     if (id) {
       const options = { ...DEFAULT_OPTIONS, ...c.options.get(id), styleSlots: { ...DEFAULT_STYLE_SLOTS } };
       c.options.set(id, options);
@@ -325,7 +377,7 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
   async resetStyleOverrides(_req, sender) {
     const key = pageKey(sender.tab!.url!);
     await patchPage(key, { styleOverrides: {} });
-    await broadcastState(key);
+    await broadcastState({ key });
   },
 
   async fetchText(req) {
@@ -342,7 +394,7 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
   /** Image bytes the page canvas can't read (cross-origin), for recoloring drawings. */
   async fetchImage(req) {
     const u = new URL(req.url);
-    if (u.protocol !== 'https:' || !/(^|\.)(google\.com|googleusercontent\.com)$/.test(u.hostname)) return null;
+    if (u.protocol !== 'https:' || !/(^|\.)(google\.com|gstatic\.com|googleusercontent\.com)$/.test(u.hostname)) return null;
     try {
       const res = await fetch(u.href, { credentials: 'include' });
       return res.ok && /^image\//.test(res.headers.get('content-type') ?? '') ? await res.arrayBuffer() : null;
@@ -354,16 +406,16 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
 
 async function togglePage(url: string, tabId: number): Promise<PageState> {
   const c = await cache();
-  const key = pageKey(url);
-  const cur = effective(c, key);
+  const scope = scopeOf(c, url);
+  const cur = effective(c, scope);
   if (!c.schemes.size) {
     push(tabId, { type: 'togglePanel', tab: 'library' }, 0);
   } else if (cur) {
-    await savePage(key, null);
+    await saveTheme(scope, null);
   } else {
-    await savePage(key, c.settings.lastTheme ?? c.settings.defaultTheme ?? firstScheme(c));
+    await saveTheme(scope, c.settings.lastTheme ?? c.settings.defaultTheme ?? firstScheme(c));
   }
-  await broadcastState(key);
+  await broadcastState({ scope });
   return resolvePage(url);
 }
 

@@ -1,10 +1,14 @@
-// Recolors flat graphics inside the document (drawings, shapes, diagrams) with theme colors.
-// Photos are detected and left alone. Only the page's local copy changes: the recolored picture
-// is a data: URL swapped into the element, and the original comes back when the theme is off.
+// Recolors pictures with theme colors: flat graphics inside the document (drawings, shapes,
+// diagrams), and thumbnails of documents (home screens), which are shown the way the document
+// itself looks when opened. Photos are detected and left alone. Only the page's local copy
+// changes: the recolored picture is a data: URL swapped in, and the original comes back when the
+// theme is off.
 import { send } from '../shared/messages';
 import type { Mapper } from '../theme/map';
 import type { RGBA } from '../theme/color';
-import { isFlatGraphic, lightOnDarkMask, recolorPixels, type LightOnDark } from '../theme/graphic';
+import {
+  isFlatGraphic, lightOnDarkMask, pageContext, recolorPixels, ZONE_TEXT, type LightOnDark,
+} from '../theme/graphic';
 
 const XLINK = 'http://www.w3.org/1999/xlink';
 /** Larger pictures are skipped: recoloring them would stall the page. */
@@ -12,10 +16,14 @@ const MAX_PIXELS = 8_000_000;
 /** Above this, light-on-dark detection runs on a downscaled copy to bound memory and time. */
 const MAX_LABEL_PIXELS = 2_000_000;
 
+/** `graphic`: only flat graphics are recolored. `page`: a picture of a document page. */
+type Mode = 'graphic' | 'page';
+
+/** Where an element's picture lives: an attribute (img src, SVG href) or its CSS background. */
+type Slot = { attr: string; ns: string | null } | { background: true };
+
 interface Swapped {
-  /** Attribute holding the picture: "src" (<img>) or "href" (SVG <image>, maybe xlink). */
-  attr: string;
-  ns: string | null;
+  slot: Slot;
   original: string;
   applied: string;
 }
@@ -23,74 +31,107 @@ interface Swapped {
 export class GraphicRecolorer {
   private mapper: Mapper | null = null;
   private themeKey = '';
-  /** Recolored data: URL per original source, for the current theme (null = leave as is). */
+  /** Recolored data: URL per mode + original source, for the current theme (null = leave as is). */
   private results = new Map<string, Promise<string | null>>();
-  /** Sources known not to be flat graphics (or unreadable): never decoded again. */
+  /** Sources known not to be recolorable (photos, unreadable): never decoded again. */
   private skip = new Set<string>();
   private swapped = new Map<Element, Swapped>();
+  /** Re-checks of elements whose background picture hadn't arrived yet. */
+  private waits = new WeakMap<Element, number>();
+  private all: string;
 
-  constructor(private selector: string) {}
+  /** `graphics`: pictures in the document; `pages`: document thumbnails. Either may be empty. */
+  constructor(graphics: string, private pages = '') {
+    this.all = [graphics, pages].filter(Boolean).join(', ');
+  }
 
   update(mapper: Mapper | null, themeKey: string) {
-    const on = !!mapper && !!this.selector && mapper.options.recolorGraphics;
+    const on = !!mapper && !!this.all && mapper.options.recolorGraphics;
     this.mapper = on ? mapper : null;
     if (!on) return this.restoreAll();
     if (themeKey !== this.themeKey) {
       this.themeKey = themeKey;
       this.results.clear();
     }
-    document.querySelectorAll(this.selector).forEach((el) => this.check(el));
+    document.querySelectorAll(this.all).forEach((el) => this.check(el));
   }
 
   /** An element was added or its picture changed. */
   check(el: Element) {
-    if (!this.mapper || !this.selector || !el.matches(this.selector)) return;
-    const { attr, ns } = pictureAttr(el);
-    const current = (ns ? el.getAttributeNS(ns, attr) : el.getAttribute(attr)) ?? '';
+    if (!this.mapper || !this.all || !el.matches(this.all)) return;
+    const mode: Mode = this.pages && el.matches(this.pages) ? 'page' : 'graphic';
+    const slot = slotOf(el);
+    const current = read(el, slot);
     const prev = this.swapped.get(el);
     const original = prev && current === prev.applied ? prev.original : current;
-    if (!original || this.skip.has(original)) return;
+    if (!original && 'background' in slot) {
+      // a card's thumbnail background often arrives later through a class: look again (bounded)
+      const n = this.waits.get(el) ?? 0;
+      if (n < 6) {
+        this.waits.set(el, n + 1);
+        setTimeout(() => this.check(el), 1000);
+      }
+      return;
+    }
+    if (!original || this.skip.has(mode + original)) return;
     const key = this.themeKey;
-    this.recolor(original).then((url) => {
+    this.recolor(original, mode).then((url) => {
       if (!url || key !== this.themeKey || !this.mapper || !el.isConnected) return;
-      const now = (ns ? el.getAttributeNS(ns, attr) : el.getAttribute(attr)) ?? '';
+      const now = read(el, slot);
       if (now !== original && now !== this.swapped.get(el)?.applied) return; // replaced meanwhile
-      this.swapped.set(el, { attr, ns, original, applied: url });
-      if (now !== url) ns ? el.setAttributeNS(ns, attr, url) : el.setAttribute(attr, url);
+      this.swapped.set(el, { slot, original, applied: url });
+      if (now !== url) write(el, slot, url);
     });
   }
 
-  private recolor(src: string): Promise<string | null> {
-    let p = this.results.get(src);
+  private recolor(src: string, mode: Mode): Promise<string | null> {
+    const k = mode + src;
+    let p = this.results.get(k);
     if (!p) {
-      const mapper = this.mapper!;
-      p = recolorSource(src, mapper).then((url) => {
-        if (url === undefined) this.skip.add(src);
+      p = recolorSource(src, this.mapper!, mode).then((url) => {
+        if (url === undefined) this.skip.add(k);
         return url ?? null;
       });
-      this.results.set(src, p);
+      this.results.set(k, p);
     }
     return p;
   }
 
   private restoreAll() {
-    for (const [el, s] of this.swapped) {
-      const now = s.ns ? el.getAttributeNS(s.ns, s.attr) : el.getAttribute(s.attr);
-      if (now === s.applied) s.ns ? el.setAttributeNS(s.ns, s.attr, s.original) : el.setAttribute(s.attr, s.original);
-    }
+    for (const [el, s] of this.swapped) if (read(el, s.slot) === s.applied) restore(el, s);
     this.swapped.clear();
     this.results.clear();
     this.themeKey = '';
   }
 }
 
-function pictureAttr(el: Element): { attr: string; ns: string | null } {
-  if (el.tagName.toLowerCase() === 'img') return { attr: 'src', ns: null };
-  return el.hasAttribute('href') || !el.hasAttributeNS(XLINK, 'href') ? { attr: 'href', ns: null } : { attr: 'href', ns: XLINK };
+function slotOf(el: Element): Slot {
+  const tag = el.tagName.toLowerCase();
+  if (tag === 'img') return { attr: 'src', ns: null };
+  if (tag === 'image') return el.hasAttribute('href') || !el.hasAttributeNS(XLINK, 'href') ? { attr: 'href', ns: null } : { attr: 'href', ns: XLINK };
+  return { background: true };
 }
 
-/** The recolored picture as a data: URL; undefined when it isn't a (readable) flat graphic. */
-async function recolorSource(src: string, mapper: Mapper): Promise<string | undefined> {
+const urlOf = (css: string) => /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(css)?.[1] ?? '';
+
+function read(el: Element, slot: Slot): string {
+  if ('background' in slot) return urlOf(getComputedStyle(el).backgroundImage);
+  return (slot.ns ? el.getAttributeNS(slot.ns, slot.attr) : el.getAttribute(slot.attr)) ?? '';
+}
+
+function write(el: Element, slot: Slot, url: string) {
+  if ('background' in slot) (el as HTMLElement).style.setProperty('background-image', `url("${url}")`, 'important');
+  else if (slot.ns) el.setAttributeNS(slot.ns, slot.attr, url);
+  else el.setAttribute(slot.attr, url);
+}
+
+function restore(el: Element, s: Swapped) {
+  if ('background' in s.slot) (el as HTMLElement).style.removeProperty('background-image');
+  else write(el, s.slot, s.original);
+}
+
+/** The recolored picture as a data: URL; undefined when it can't or shouldn't be recolored. */
+async function recolorSource(src: string, mapper: Mapper, mode: Mode): Promise<string | undefined> {
   try {
     const bitmap = await decode(src);
     if (!bitmap || bitmap.width * bitmap.height > MAX_PIXELS) return undefined;
@@ -98,14 +139,24 @@ async function recolorSource(src: string, mapper: Mapper): Promise<string | unde
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(bitmap, 0, 0);
     const img = ctx.getImageData(0, 0, bitmap.width, bitmap.height);
-    if (!isFlatGraphic(img.data, img.width, img.height)) return undefined;
-    // White marks inside dark shapes stay light-on-dark: their grey is pre-inverted before mapping,
-    // and their anti-aliased edges blend the two mapped colors in the original proportion.
-    const { zone, pairs } = scaledLightOnDarkMask(img.data, img.width, img.height);
+    if (mode === 'graphic' && !isFlatGraphic(img.data, img.width, img.height)) return undefined;
+    // Drawings: white marks inside dark shapes stay light-on-dark (grey pre-inverted before mapping,
+    // anti-aliased edges blended in proportion). Page pictures map like the page itself instead:
+    // photos stay, colored text maps as text; at thumbnail scale letter counters would pass for
+    // marks, and solid fills keep background-colored text readable anyway.
+    const { zone, pairs } = mode === 'page'
+      ? { zone: pageContext(img.data, img.width, img.height), pairs: [] as LightOnDark['pairs'] }
+      : scaledLightOnDarkMask(img.data, img.width, img.height);
     const plain = (rgb: number) => pack(mapper.mapRGBA(unpack(rgb), 'graphic'));
+    const asText = (rgb: number) => {
+      const c = unpack(rgb);
+      // greys keep the page ramp (black ink → the theme's text color); colors map like text
+      return Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b) < 24 ? plain(rgb) : pack(mapper.mapRGBA(c, 'text'));
+    };
     const flipped = (rgb: number) => plain(0xffffff - rgb);
     recolorPixels(img.data, (r, g, b, z) => {
       const rgb = (r << 16) | (g << 8) | b;
+      if (z === ZONE_TEXT) return asText(rgb);
       if (z < 0) return plain(rgb);
       if (z & 1) return flipped(rgb);
       const { mark, shape } = pairs[z >> 1];
