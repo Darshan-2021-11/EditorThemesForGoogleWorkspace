@@ -60,6 +60,7 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
       const target = Math.min(4.5, contrast(c, WHITE));
       return withAlpha(t >= 0.12 ? ensureContrast(out, roles.bg, target) : out, c.a);
     }
+    if (kind === 'graphic') return withAlpha(rampAt(roles, t), c.a);
     if (kind === 'fill' && t > 0.6) t = 0.1 + (1 - t) * 0.25; // dark surfaces (tooltips) stay dark-ish
     return withAlpha(rampAt(roles, t), c.a);
   }

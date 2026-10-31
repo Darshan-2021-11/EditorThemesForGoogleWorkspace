@@ -14,7 +14,8 @@ export interface Scheme {
   origin?: string;
 }
 
-export type ColorKind = 'text' | 'fill' | 'line' | 'onAccent';
+/** `graphic`: pixels of a recolored drawing (white → background, black → foreground, colors → fills). */
+export type ColorKind = 'text' | 'fill' | 'line' | 'onAccent' | 'graphic';
 
 export type MappingMode = 'snap' | 'keep-hue';
 
@@ -44,6 +45,8 @@ export interface ThemeOptions {
   dimImages: boolean;
   /** Brightness multiplier when dimming, 0.5..1. */
   dimAmount: number;
+  /** Recolor flat graphics (drawings, shapes, diagrams) with theme colors; photos stay as they are. */
+  recolorGraphics: boolean;
 }
 
 export const DEFAULT_OPTIONS: ThemeOptions = {
@@ -52,6 +55,7 @@ export const DEFAULT_OPTIONS: ThemeOptions = {
   styleSlots: DEFAULT_STYLE_SLOTS,
   dimImages: false,
   dimAmount: 0.85,
+  recolorGraphics: true,
 };
 
 /** A fully resolved theme ready to apply. */

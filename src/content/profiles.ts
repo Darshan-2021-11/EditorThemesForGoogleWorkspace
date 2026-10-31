@@ -32,6 +32,8 @@ export interface AppProfile {
    * when "color by paragraph style" is on. `onChange`: earlier answers may be stale.
    */
   textStyles?(onChange: () => void): ElementTextStyles;
+  /** Pictures inside the document (<img> or SVG <image>); flat graphics among them get recolored. */
+  graphics: string;
   /** Extra UI CSS. */
   uiCss(r: Roles): string;
 }
@@ -61,6 +63,7 @@ const docs: AppProfile = {
     .kix-page-paginated { box-shadow: 0 0 0 1px ${hex(r.surfaceAlt)} !important; }` +
     // Docs draws pictures as SVG <image> over the text canvas, not on the canvas itself.
     (o.dimImages ? `.kix-canvas-tile-content image, .kix-page-paginated img { filter: brightness(${o.dimAmount}) !important; }` : ''),
+  graphics: '.kix-canvas-tile-content image, .kix-page-paginated img',
   uiCss: () => '',
 };
 
@@ -72,6 +75,8 @@ const sheets: AppProfile = {
   // Only layers *below* the grid canvas: .grid4-inner-container sits above it (z-index 3).
   docCss: (r, o) => `#waffle-grid-container, .grid-container { background-color: ${hex(r.bg)} !important; }` +
     (o.dimImages ? `#waffle-grid-container img { filter: brightness(${o.dimAmount}) !important; }` : ''),
+  // drawings and images placed over the grid
+  graphics: '#waffle-grid-container img',
   uiCss: () => '',
 };
 
@@ -86,6 +91,20 @@ const slides: AppProfile = {
   docCss: (_r, o) => (o.dimImages ? `:is(${SLIDE_SVG}) image { filter: brightness(${o.dimAmount}) !important; }` : ''),
   // Speaker notes have their own sizes: they never set or take heading tiers.
   textStyles: (onChange) => new SlideTextStyles('#pages svg, .punch-filmstrip-thumbnails', onChange),
+  graphics: `:is(${SLIDE_SVG}) image`,
+  uiCss: () => '',
+};
+
+// Drawings use the same SVG editor as Slides, without filmstrip or notes.
+const DRAWING_SVG = '#workspace svg';
+const drawings: AppProfile = {
+  app: 'drawings',
+  docRegion: DRAWING_SVG,
+  canvasDoc: false,
+  keepColors: KEEP_COLORS,
+  docCss: (_r, o) => (o.dimImages ? `${DRAWING_SVG} image { filter: brightness(${o.dimAmount}) !important; }` : ''),
+  textStyles: (onChange) => new SlideTextStyles(DRAWING_SVG, onChange),
+  graphics: `${DRAWING_SVG} image`,
   uiCss: () => '',
 };
 
@@ -100,15 +119,18 @@ const forms: AppProfile = {
       [role="heading"][aria-level="2"]:not([role="dialog"] *) { color: ${s.h1} !important; }
       [role="listitem"] [role="heading"][aria-level="3"]:not([role="dialog"] *) { color: ${s.h2} !important; }` : '') +
     (o.dimImages ? `form img, [role="listitem"] img { filter: brightness(${o.dimAmount}) !important; }` : ''),
+  graphics: 'form img, [role="listitem"] img',
   uiCss: () => '',
 };
 
+// Drive and home pages show thumbnails of other files: those stay as they are.
 const plain = (app: AppId): AppProfile => ({
   app,
   docRegion: '',
   canvasDoc: false,
   keepColors: KEEP_COLORS,
   docCss: () => '',
+  graphics: '',
   uiCss: () => '',
 });
 
@@ -117,5 +139,6 @@ export function profileFor(app: AppId): AppProfile {
   if (app === 'sheets') return sheets;
   if (app === 'slides') return slides;
   if (app === 'forms') return forms;
+  if (app === 'drawings') return drawings;
   return plain(app);
 }

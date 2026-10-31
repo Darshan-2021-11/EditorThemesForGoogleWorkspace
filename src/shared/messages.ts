@@ -64,6 +64,7 @@ export type Request =
   | { type: 'exportBackup' }
   | { type: 'importBackup'; data: BackupFile }
   | { type: 'fetchText'; url: string }
+  | { type: 'fetchImage'; url: string }
   | { type: 'docStyleColors'; colors: Partial<Record<StyleKey, string>> }
   | { type: 'setStyleSlot'; style: StyleKey; value: string }
   | { type: 'resetStyleColors' }
@@ -84,6 +85,7 @@ export interface ResponseMap {
   exportBackup: BackupFile;
   importBackup: { schemes: number; pages: number };
   fetchText: string | null;
+  fetchImage: ArrayBuffer | null;
   docStyleColors: void;
   setStyleSlot: void;
   resetStyleColors: void;

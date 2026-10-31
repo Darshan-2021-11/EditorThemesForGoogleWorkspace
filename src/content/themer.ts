@@ -7,6 +7,7 @@ import { schemeToRoles, type Roles } from '../theme/roles';
 import { isInkColor, styleColors } from '../theme/style-colors';
 import type { ColorKind, StyleKey, ThemeSpec } from '../theme/types';
 import { extractColorRules, renderRules, type ColorRule } from './css-remap';
+import { GraphicRecolorer } from './graphics';
 import type { AppProfile } from './profiles';
 import type { ElementTextStyles } from './slide-styles';
 
@@ -59,11 +60,13 @@ export class PageThemer {
   private inlineSheet: HTMLStyleElement | null = null;
   private inlineRules = new Set<string>();
   private observer: MutationObserver | null = null;
+  private graphics: GraphicRecolorer;
 
   /** Whether the open color palette belongs to the text-color or the highlight button. */
   private paletteKind: ColorKind = 'text';
 
   constructor(private profile: AppProfile) {
+    this.graphics = new GraphicRecolorer(profile.graphics);
     this.textStyles = profile.textStyles?.(() => { this.restyleText = true; }) ?? null;
     // The hook may load after our first config; re-send when it announces itself.
     window.addEventListener(READY_EVENT, () => this.sendHookConfig());
@@ -116,6 +119,8 @@ export class PageThemer {
     this.ensureObserving();
     for (const [node, src] of this.sources) this.writeOverride(node, src);
     this.rescanInline();
+    // recolored pictures depend only on the palette and mapping mode, not on other options
+    this.graphics.update(this.mapper, `${spec!.scheme.id}|${JSON.stringify(spec!.scheme.palette)}|${spec!.options.mapping}`);
   }
 
   private sendHookConfig() {
@@ -169,7 +174,8 @@ export class PageThemer {
     this.observer = new MutationObserver((muts) => this.onMutations(muts));
     this.observer.observe(document, {
       childList: true, subtree: true, attributes: true, characterData: true,
-      attributeFilter: ['style', 'fill', 'stroke'],
+      // href/src: pictures that may need recoloring (also matches xlink:href)
+      attributeFilter: ['style', 'fill', 'stroke', 'href', 'src'],
     });
     document.querySelectorAll('style, link[rel~="stylesheet"]').forEach((n) => this.addSheetNode(n));
   }
@@ -177,7 +183,8 @@ export class PageThemer {
   private onMutations(muts: MutationRecord[]) {
     for (const m of muts) {
       if (m.type === 'attributes') {
-        this.pending.add(m.target as Element);
+        if (m.attributeName === 'href' || m.attributeName === 'src') this.graphics.check(m.target as Element);
+        else this.pending.add(m.target as Element);
         continue;
       }
       const target = m.target as Node;
@@ -195,6 +202,10 @@ export class PageThemer {
         }
         this.pending.add(el);
         el.querySelectorAll('[style], [fill], [stroke]').forEach((d) => this.pending.add(d));
+        if (this.profile.graphics) {
+          this.graphics.check(el);
+          el.querySelectorAll(this.profile.graphics).forEach((g) => this.graphics.check(g));
+        }
         el.querySelectorAll('style, link[rel~="stylesheet"]').forEach((s) => this.addSheetNode(s));
       });
       m.removedNodes.forEach((n) => {
@@ -356,6 +367,7 @@ export class PageThemer {
   // ----------------------------------------------------------------------------------------
 
   private teardown() {
+    this.graphics.update(null, '');
     this.observer?.disconnect();
     this.observer = null;
     for (const src of this.sources.values()) src.override.textContent = '';

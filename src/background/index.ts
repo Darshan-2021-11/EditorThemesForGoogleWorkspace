@@ -338,6 +338,18 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
       return null;
     }
   },
+
+  /** Image bytes the page canvas can't read (cross-origin), for recoloring drawings. */
+  async fetchImage(req) {
+    const u = new URL(req.url);
+    if (u.protocol !== 'https:' || !/(^|\.)(google\.com|googleusercontent\.com)$/.test(u.hostname)) return null;
+    try {
+      const res = await fetch(u.href, { credentials: 'include' });
+      return res.ok && /^image\//.test(res.headers.get('content-type') ?? '') ? await res.arrayBuffer() : null;
+    } catch {
+      return null;
+    }
+  },
 };
 
 async function togglePage(url: string, tabId: number): Promise<PageState> {
