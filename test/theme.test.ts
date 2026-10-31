@@ -120,14 +120,38 @@ describe('mapper (Nord, snap)', () => {
 
   it('colored text snaps to theme accents with readable contrast', () => {
     const red = parseColor(m.map('#ff0000', 'text'))!;
-    expect(contrast(red, roles.bg)).toBeGreaterThanOrEqual(3.5);
+    // WCAG AA on the page and on every panel the theme paints
+    for (const s of [roles.bg, roles.surface, roles.surfaceAlt]) expect(contrast(red, s)).toBeGreaterThanOrEqual(4.5);
     expect(m.map('#3c78d8', 'text')).toBe(m.map('#4a86e8', 'text')); // both blue
-    expect(m.map('#1155cc', 'text')).toBe(nord.palette.base0C); // Docs link color → theme link role
+    // Docs link color → theme link role (cyan), nudged only as far as AA needs
+    const link = parseColor(m.map('#1155cc', 'text'))!;
+    expect(toOklch(link)[2]).toBeCloseTo(toOklch(parseColor(nord.palette.base0C)!)[2], -1);
+    expect(contrast(link, roles.surfaceAlt)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it('secondary grey text stays readable', () => {
+  it('secondary grey text meets WCAG AA on every surface', () => {
     const c = parseColor(m.map('#9aa0a6', 'text'))!;
-    expect(contrast(c, roles.bg)).toBeGreaterThanOrEqual(2.5);
+    for (const s of [roles.bg, roles.surface, roles.surfaceAlt]) expect(contrast(c, s)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it('contrast fixes keep the theme: accent hue and most of its chroma survive', () => {
+    for (const scheme of [nord, solarizedLight]) {
+      const mm = createMapper(schemeToRoles(scheme), DEFAULT_OPTIONS);
+      for (const [raw, slot] of [['#ff0000', 'base08'], ['#00a000', 'base0B'], ['#0000ff', 'base0D'], ['#9900ff', 'base0E']]) {
+        const [, C0, H0] = toOklch(parseColor(scheme.palette[slot])!);
+        const [, C1, H1] = toOklch(parseColor(mm.map(raw, 'text'))!);
+        const dh = Math.min(Math.abs(H1 - H0), 360 - Math.abs(H1 - H0));
+        expect(dh, `${scheme.name} ${slot} hue`).toBeLessThan(12);
+        // Bright accents that must darken for AA (Solarized's yellow-green on cream) hit the sRGB
+        // gamut edge: the most saturated in-gamut color at that lightness keeps about half the chroma.
+        expect(C1, `${scheme.name} ${slot} chroma`).toBeGreaterThan(C0 * 0.45);
+      }
+    }
+  });
+
+  it('solid accent fills keep text in the background color readable', () => {
+    const btn = parseColor(m.map('#1a73e8', 'fill'))!;
+    expect(contrast(btn, roles.bg)).toBeGreaterThanOrEqual(4.5);
   });
 
   it('white text on buttons stays light', () => {

@@ -39,18 +39,62 @@ export function kindForProperty(prop: string): ColorKind | null {
   return null;
 }
 
-/** Guesses how a CSS custom property holding a color is used, from its name and value. */
-export function kindForVariable(name: string, value: string): ColorKind | null {
-  const v = value.trim();
-  const c = parseColor(v);
-  if (!c) return null;
+/** How a custom property is used, judging by its name alone; null when the name doesn't say. */
+export function kindFromVariableName(name: string): ColorKind | null {
   const n = name.toLowerCase();
   // on-primary sits on a solid accent; on-primary-container/-fixed sit on pale tints (normal text)
   if (/(^|-)on-(primary|secondary|tertiary|error|accent)(-rgb)?$/.test(n)) return 'onAccent';
   if (/(^|-)on-|text|foreground|(^|-)fg(-|$)|font|ink|icon|label|title|caption/.test(n)) return 'text';
   if (/outline|border|divider|stroke|separator|(^|-)line(-|$)|rule/.test(n)) return 'line';
   if (/surface|background|(^|-)bg(-|$)|container|fill|scrim|overlay|highlight|hover|state|tint|shadow|backdrop/.test(n)) return 'fill';
-  return toOklch(c)[0] > 0.6 ? 'fill' : 'text';
+  return null;
+}
+
+/** Guesses how a CSS custom property holding a color is used, from its name and value. */
+export function kindForVariable(name: string, value: string): ColorKind | null {
+  const c = parseColor(value.trim());
+  if (!c) return null;
+  return kindFromVariableName(name) ?? (toOklch(c)[0] > 0.6 ? 'fill' : 'text');
+}
+
+/**
+ * Every color variable also gets a text twin (`--wd-t--name`, mapped as text), and text
+ * properties read the twin first: a variable shared by filled buttons and labels (Material's
+ * `primary`) is then readable as text and solid as a fill. Variables we never saw defined
+ * fall back to the original.
+ */
+const twinName = (name: string) => `--wd-t${name}`;
+
+/** Refers to an on-primary-style color: text that sits on a solid accent (filled button labels). */
+const ON_ACCENT_REF = /var\(\s*--[\w-]*?(?:^|-)on-(?:primary|secondary|tertiary|error|accent)(?:-rgb)?\s*[,)]/;
+
+export function withTextTwins(value: string): string {
+  let out = '';
+  const closers: number[] = []; // paren depths at which a twin's extra ")" is due
+  let depth = 0;
+  for (let i = 0; i < value.length; i++) {
+    const m = value.startsWith('var(', i) ? /^var\(\s*(--[\w-]+)/.exec(value.slice(i)) : null;
+    if (m && !m[1].startsWith('--wd-t')) {
+      out += `var(${twinName(m[1])}, var(`;
+      closers.push(depth);
+      depth++;
+      i += 3;
+      continue;
+    }
+    const ch = value[i];
+    if (ch === '(') depth++;
+    if (ch === ')') {
+      depth--;
+      out += ')';
+      if (closers.length && closers[closers.length - 1] === depth) {
+        closers.pop();
+        out += ')';
+      }
+      continue;
+    }
+    out += ch;
+  }
+  return out;
 }
 
 const COLOR_TOKEN = new RegExp(
@@ -197,20 +241,40 @@ export function extractStyleRule(selector: string, style: CSSStyleDeclaration, w
       triple = !!t;
       kind = kindForVariable(prop, t ? `rgb(${t[1]},${t[2]},${t[3]})` : value);
     } else kind = kindForProperty(prop);
-    if (!kind) continue;
-    if (triple) {
-      decls.push({ prop, value, kind, important: style.getPropertyPriority(prop) === 'important', triple });
+    // An alias (--a: var(--b, #fallback)): Material components define their colors this way, and the
+    // fallback is what shows when --b is undefined. Remap it (kind from the name, else the
+    // fallback color), and keep the text chain: its twin reads the twin of what it points to.
+    if (!kind && prop.startsWith('--') && value.includes('var(')) {
+      const important = style.getPropertyPriority(prop) === 'important';
+      if (ON_ACCENT_REF.test(value)) {
+        decls.push({ prop: twinName(prop), value, kind: 'onAccent', important }, { prop, value, kind: 'onAccent', important });
+        continue;
+      }
+      decls.push({ prop: twinName(prop), value: withTextTwins(value), kind: 'text', important });
+      const fallback = value.match(COLOR_TOKEN)?.pop();
+      const ak = kindFromVariableName(prop) ?? (fallback ? kindForVariable(prop, fallback) : null);
+      if (ak) decls.push({ prop, value, kind: ak, important });
       continue;
     }
-    const varName = /^var\(\s*(--[\w-]+)/.exec(value)?.[1];
-    if (kind === 'text' && varName) {
-      const vk = kindForVariable(varName, '#ffffff');
+    if (!kind) continue;
+    const important = style.getPropertyPriority(prop) === 'important';
+    if (triple) {
+      decls.push({ prop, value, kind, important, triple });
+      continue;
+    }
+    let v = value;
+    if (prop.startsWith('--')) {
+      decls.push({ prop: twinName(prop), value, kind: 'text', important });
+    } else if (kind === 'text' && value.includes('var(')) {
+      const vk = kindFromVariableName(/^var\(\s*(--[\w-]+)/.exec(value)?.[1] ?? '');
       // Text painted in a surface color is deliberately invisible (e.g. Docs' title <input>,
       // whose visible text is a separate label): keep it matching the surface.
       if (vk === 'onAccent' || vk === 'fill') kind = vk;
+      else if (ON_ACCENT_REF.test(value)) kind = 'onAccent';
+      else v = withTextTwins(value);
     }
     if (prop === 'background-color' && isStrongChromatic(value)) strongBg = true;
-    decls.push({ prop, value, kind, important: style.getPropertyPriority(prop) === 'important' });
+    decls.push({ prop, value: v, kind, important });
   }
   // White text on a solid accent background (buttons): text becomes the theme background color.
   if (strongBg) for (const d of decls) if (d.prop === 'color' && isLight(d.value)) d.kind = 'onAccent';

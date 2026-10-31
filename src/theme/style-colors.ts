@@ -1,7 +1,7 @@
 // The exact color each paragraph style is painted with. Shared by the canvas hook (painting) and
 // the panel (showing it), so the two can never disagree.
-import { ensureContrast, formatColor, parseColor, toOklab } from './color';
-import { createMapper } from './map';
+import { formatColor, parseColor, toOklab } from './color';
+import { createMapper, readableOnSurfaces } from './map';
 import { schemeToRoles } from './roles';
 import { DEFAULT_STYLE_SLOTS, STYLE_KEYS, type StyleKey, type ThemeSpec } from './types';
 
@@ -12,12 +12,12 @@ export const STYLE_SLOT_CHOICES = [
 ];
 
 /** A style's value is a palette slot ("base0D") or, for colors outside the palette, "#rrggbb". */
-export function resolveStyleValue(spec: ThemeSpec, value: string, key: StyleKey): string {
+export function resolveStyleValue(spec: ThemeSpec, value: string, _key: StyleKey): string {
   const roles = schemeToRoles(spec.scheme);
   const c = parseColor(value.startsWith('#') ? value : spec.scheme.palette[value] ?? '') ?? roles.fg;
-  // Only nudged when unreadable on the theme's background (3:1 for heading-sized text).
-  const min = key === 'normal' || key === 'link' || key === 'code' ? 4.5 : 3;
-  return formatColor({ ...ensureContrast(c, roles.bg, min), a: 1 });
+  // Nudged only when below WCAG AA on the theme's background and panels. Headings get 4.5:1 too:
+  // H4–H6 (and headings in small documents) are often body-sized.
+  return formatColor({ ...readableOnSurfaces(c, roles, 4.5), a: 1 });
 }
 
 /** Default ink (black / dark grey): text that keeps the theme's own colors. */

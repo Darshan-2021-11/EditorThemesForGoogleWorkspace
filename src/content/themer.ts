@@ -10,6 +10,7 @@ import { extractColorRules, renderRules, type ColorRule } from './css-remap';
 import { GraphicRecolorer } from './graphics';
 import type { AppProfile } from './profiles';
 import type { ElementTextStyles } from './slide-styles';
+import { SvgTextContrast } from './svg-contrast';
 
 export const PANEL_HOST_ID = 'wd-panel-host';
 const OWN_ATTR = 'data-wd-own';
@@ -53,6 +54,8 @@ export class PageThemer {
   /** Styles of document text drawn as elements (Slides), and whether its answers went stale. */
   private textStyles: ElementTextStyles | null;
   private restyleText = false;
+  /** Contrast of document text drawn as SVG against the shapes behind it. */
+  private svgText: SvgTextContrast | null;
   private sources = new Map<Element, SheetSource>();
   private pending = new Set<Element>();
   private crossOriginCache = new Map<string, Promise<string | null>>();
@@ -68,6 +71,7 @@ export class PageThemer {
   constructor(private profile: AppProfile) {
     this.graphics = new GraphicRecolorer(profile.graphics);
     this.textStyles = profile.textStyles?.(() => { this.restyleText = true; }) ?? null;
+    this.svgText = profile.textStyles && profile.docRegion ? new SvgTextContrast(profile.docRegion) : null;
     // The hook may load after our first config; re-send when it announces itself.
     window.addEventListener(READY_EVENT, () => this.sendHookConfig());
     if (profile.docColorControls) {
@@ -113,6 +117,7 @@ export class PageThemer {
     this.roles = spec ? schemeToRoles(spec.scheme) : null;
     this.mapper = spec && this.roles ? createMapper(this.roles, spec.options) : null;
     this.styles = spec?.options.styleColors ? styleColors(spec) : null;
+    this.svgText?.setMapper(this.mapper);
     this.sendHookConfig();
     if (!this.active) return this.teardown();
     this.writeBase();
@@ -274,10 +279,13 @@ export class PageThemer {
 
   private flushInline() {
     if (!this.pending.size) return;
-    const els = [...this.pending];
+    let els = [...this.pending];
     this.pending.clear();
     this.textStyles?.invalidate();
+    // Layout reads for text backdrops all happen here, before any marker is written.
+    if (this.svgText) els = this.svgText.prepare(els);
     for (const el of els) this.applyInline(el);
+    this.svgText?.end();
     if (this.restyleText) {
       // The deck's body size moved: headings told apart by size need another look.
       this.restyleText = false;
@@ -310,11 +318,10 @@ export class PageThemer {
         continue;
       }
       if (read === 'fill' && kind === 'text' && inDoc && !useControl) {
-        const styled = this.styledTextColor(el, v);
-        if (styled) {
-          this.setInline(el, attr, prop, styled);
-          continue;
-        }
+        // Document text: by paragraph style or mapped, then made to read on the shape behind it.
+        const color = this.styledTextColor(el, v) ?? m.mapRGBA(c, kind);
+        this.setInline(el, attr, prop, this.svgText ? this.svgText.fit(el, color) : color);
+        continue;
       }
       this.setInline(el, attr, prop, m.mapRGBA(c, kind));
     }

@@ -1,4 +1,4 @@
-import { extractStyleRule, kindForVariable, remapValue, renderRules } from '../src/content/css-remap';
+import { extractStyleRule, kindForVariable, remapValue, renderRules, withTextTwins } from '../src/content/css-remap';
 import { createMapper } from '../src/theme/map';
 import { schemeToRoles } from '../src/theme/roles';
 import { DEFAULT_OPTIONS } from '../src/theme/types';
@@ -32,6 +32,31 @@ describe('css remapping', () => {
     const late = extractStyleRule('.m #c', style({ 'background-color': 'inherit' }))!;
     const css = renderRules([early, late], m,true);
     expect(css.indexOf('.m #c{background-color:inherit;}')).toBeGreaterThan(css.indexOf('#c.docs{'));
+  });
+
+  it('text reads a text twin of shared color variables (labels stay readable)', () => {
+    expect(withTextTwins('var(--gm3-sys-color-primary,#0b57d0)')).toBe('var(--wd-t--gm3-sys-color-primary, var(--gm3-sys-color-primary,#0b57d0))');
+    expect(withTextTwins('var(--a, var(--b, red))')).toBe('var(--wd-t--a, var(--a, var(--wd-t--b, var(--b, red))))');
+    const def = extractStyleRule(':root', style({ '--gm3-sys-color-primary': '#0b57d0' }))!;
+    expect(def.decls.map((d) => [d.prop, d.kind])).toEqual([['--wd-t--gm3-sys-color-primary', 'text'], ['--gm3-sys-color-primary', 'text']]);
+    const use = extractStyleRule('.tab', style({ color: 'var(--gm3-sys-color-primary,#0b57d0)' }))!;
+    expect(use.decls[0].value).toContain('var(--wd-t--gm3-sys-color-primary');
+    expect(use.decls[0].kind).toBe('text');
+    // surface-colored text stays matched to the surface (deliberately invisible input text)
+    expect(extractStyleRule('.t', style({ color: 'var(--gm3-sys-color-surface)' }))!.decls[0].kind).toBe('fill');
+  });
+
+  it('remaps the fallback of aliased component colors (Material buttons, dialogs)', () => {
+    const r = extractStyleRule('.btn', style({ '--gm3-button-filled-tonal-container-color': 'var(--gm3-sys-color-primary-container,#d3e3fd)' }))!;
+    const css = renderRules([r], m, true);
+    expect(css).toContain('--gm3-button-filled-tonal-container-color:var(--gm3-sys-color-primary-container,');
+    expect(css).not.toContain('#d3e3fd');
+  });
+
+  it('filled-button labels aliased to on-primary sit on the accent', () => {
+    const r = extractStyleRule('.b', style({ '--gm3-button-filled-label-text-color': 'var(--gm3-sys-color-on-primary,#fff)' }))!;
+    expect(r.decls.every((d) => d.kind === 'onAccent')).toBe(true);
+    expect(renderRules([r], m, true)).toContain(nord.palette.base00);
   });
 
   it('captures var() shorthands whose longhands read back empty', () => {

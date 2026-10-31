@@ -8,6 +8,7 @@ import { styleColors as computeStyleColors } from '../theme/style-colors';
 import type { ColorKind, StyleKey, ThemeSpec } from '../theme/types';
 import { ANSWER_EVENT, CONFIG_EVENT, DOC_STYLES_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQuery } from '../shared/hook-protocol';
 import { buildIndex, MONO_RE, parseExportHtml, parseStyleColors, StyleLearner, styleFromName } from './styles';
+import { PairContrast, parseFont, RectStore, textTarget } from './contrast-pairs';
 
 type Ctx2D = CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D;
 type Style = string | CanvasGradient | CanvasPattern;
@@ -19,9 +20,13 @@ interface CtxState {
   appliedFill?: string;
   appliedStroke?: string;
   stack: [Style, Style, string | undefined, string | undefined][];
+  /** Recent opaque fill rects (device px) with their painted color: what text lands on. */
+  rects?: RectStore;
 }
 
 let mapper: Mapper | null = null;
+/** Text-vs-background contrast for the active theme (null while inactive). */
+let pairs: PairContrast | null = null;
 /** Theme color per paragraph style, when "color by paragraph style" is on. */
 let styleColors: Record<StyleKey, string> | null = null;
 let learner: StyleLearner | null = null;
@@ -178,12 +183,13 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
     },
   });
 
-  function prepFill(c: Ctx2D, kind: ColorKind, text?: string) {
+  function prepFill(c: Ctx2D, kind: ColorKind, text?: string, args?: unknown[]) {
     const s = st(c);
     if (typeof s.fill !== 'string') return;
     let want = s.fill;
     if (mapper) {
       want = (text !== undefined && styleColorFor(c.font, s.fill, text)) || mapper.map(s.fill, kind);
+      if (args && pairs) want = pairText(c, s, want, args, pairs);
     }
     if (want !== s.appliedFill) {
       fillD.set!.call(c, want);
@@ -217,6 +223,7 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
           }
         }
         before(this, args);
+        if (__WD_DEV__ && name === 'fillText') auditText(this, args, getFill(this));
         if (__WD_DEV__) {
           const trace = (debug as { trace?: unknown[] }).trace;
           if (trace && trace.length < 4000) {
@@ -230,9 +237,16 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
   };
 
   const thin = (w: unknown, h: unknown) => Math.abs(Number(w)) <= 2.5 || Math.abs(Number(h)) <= 2.5;
-  wrap('fillRect', (c, a) => prepFill(c, thin(a[2], a[3]) ? 'text' : 'fill'));
+  wrap('fillRect', (c, a) => {
+    const line = thin(a[2], a[3]);
+    prepFill(c, line ? 'text' : 'fill');
+    if (pairs && !line) rememberRect(c, a, pairs);
+  });
   wrap('fill', (c) => prepFill(c, 'fill'));
-  wrap('fillText', (c, a) => prepFill(c, 'text', String(a[0])));
+  wrap('fillText', (c, a) => prepFill(c, 'text', String(a[0]), a));
+  wrap('clearRect', (c, a) => {
+    if (pairs) forgetArea(c, Number(a[0]), Number(a[1]), Number(a[2]), Number(a[3]));
+  });
   wrap('strokeText', (c) => prepStroke(c, 'text'));
   wrap('stroke', (c) => prepStroke(c, 'line'));
   wrap('strokeRect', (c) => prepStroke(c, 'line'));
@@ -266,6 +280,13 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
       const src = args[0] as { constructor?: { name?: string }; width?: number };
       if (trace && trace.length < 4000) trace.push(['drawImage', src?.constructor?.name, src?.width, (this as CanvasRenderingContext2D).canvas?.width, args.slice(1, 5).map((a) => Math.round(Number(a)))]);
     }
+    if (pairs) {
+      // An image now covers its destination: fills remembered under it no longer show.
+      const n = args.length >= 9 ? 5 : 1;
+      const src = args[0] as { width?: unknown; height?: unknown };
+      const w = args.length >= 5 ? args[n + 2] : src?.width, h = args.length >= 5 ? args[n + 3] : src?.height;
+      forgetArea(this, Number(args[n]), Number(args[n + 1]), Number(w), Number(h));
+    }
     if (mapper?.options.dimImages && isPicture(args[0])) {
       const prev = this.filter;
       this.filter = `brightness(${mapper.options.dimAmount})`;
@@ -277,6 +298,103 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
     }
     return drawImage.apply(this, args);
   } as typeof proto.drawImage;
+}
+
+/**
+ * Dev-only contrast audit (scripts/contrast-audit.mjs): before a run of text is drawn, reads the
+ * pixels under it and records the contrast of the painted text color against the dominant one.
+ */
+function auditText(c: Ctx2D, args: unknown[], fill: Style) {
+  const audit = (debug as { audit?: unknown[] }).audit;
+  if (!audit || audit.length >= 3000 || typeof fill !== 'string') return;
+  const text = String(args[0]);
+  if (!text.trim()) return;
+  try {
+    const m = c.measureText(text);
+    const t = c.getTransform();
+    const x = Number(args[1]), y = Number(args[2]);
+    const x0 = Math.floor(t.a * x + t.e), x1 = Math.ceil(t.a * (x + m.width) + t.e);
+    const y0 = Math.floor(t.d * (y - m.actualBoundingBoxAscent) + t.f), y1 = Math.ceil(t.d * (y + m.actualBoundingBoxDescent) + t.f);
+    const w = Math.min(x1 - x0, 400), h = y1 - y0;
+    if (w < 1 || h < 1 || x0 < 0 || y0 < 0) return;
+    const d = c.getImageData(x0, y0, w, h).data;
+    const counts = new Map<number, number>();
+    for (let i = 0; i < d.length; i += 16) {
+      const k = d[i + 3] < 128 ? -1 : (d[i] << 16) | (d[i + 1] << 8) | d[i + 2];
+      counts.set(k, (counts.get(k) ?? 0) + 1);
+    }
+    let bg = -1, best = 0;
+    for (const [k, n] of counts) if (n > best) { bg = k; best = n; }
+    const px = Math.abs(t.d) * parseFloat(/(\d+(?:\.\d+)?)px/.exec(c.font)?.[1] ?? '0');
+    audit.push({
+      text: text.slice(0, 40), fg: fill, bg: bg < 0 ? 'transparent' : '#' + bg.toString(16).padStart(6, '0'),
+      px: Math.round(px * 10) / 10, bold: /\b(bold|[6-9]00)\b/.test(c.font),
+    });
+  } catch {
+    // tainted or unmeasurable: skip
+  }
+}
+
+// ------------------------------------------------------------------------------------------
+// Text contrast against what it's drawn on
+
+/** Vertical middle of the text relative to y, in font sizes, per textBaseline. */
+const BASELINE_MID: Record<string, number> = { top: 0.5, hanging: 0.45, middle: 0, ideographic: -0.5, bottom: -0.5 };
+
+/** Remembers an opaque fillRect (device px) with the color prepFill just applied. */
+function rememberRect(c: Ctx2D, a: unknown[], p: PairContrast) {
+  const s = states.get(c);
+  if (!s) return;
+  const x = Number(a[0]), y = Number(a[1]), w = Number(a[2]), h = Number(a[3]);
+  if (!(Number.isFinite(x) && Number.isFinite(y) && Number.isFinite(w) && Number.isFinite(h))) return;
+  if (c.globalCompositeOperation !== 'source-over') {
+    forgetArea(c, x, y, w, h);
+    return;
+  }
+  // Translucent fills (selection tints, hover) don't replace what's under them: ignore.
+  const color = s.appliedFill;
+  if (color === undefined || c.globalAlpha < 0.999 || !p.isOpaque(color)) return;
+  const t = c.getTransform();
+  const rects = (s.rects ??= new RectStore());
+  rects.checkSize(c.canvas.width, c.canvas.height, debug.configs);
+  if (t.b !== 0 || t.c !== 0) {
+    rects.clear(); // rotated/skewed: can't place it, so don't trust older rects either
+    return;
+  }
+  rects.add(t.a * x + t.e, t.d * y + t.f, t.a * (x + w) + t.e, t.d * (y + h) + t.f, color);
+}
+
+/** Drops remembered fills overlapping a user-space rect (cleared, or painted over by an image). */
+function forgetArea(c: Ctx2D, x: number, y: number, w: number, h: number) {
+  const rects = states.get(c)?.rects;
+  if (!rects?.length) return;
+  const t = c.getTransform();
+  if (t.b !== 0 || t.c !== 0 || !(Number.isFinite(x + y + w + h))) {
+    rects.clear();
+    return;
+  }
+  rects.invalidate(t.a * x + t.e, t.d * y + t.f, t.a * (x + w) + t.e, t.d * (y + h) + t.f);
+}
+
+/** The text color to paint: `color` raised to WCAG AA against the fill under the text anchor. */
+function pairText(c: Ctx2D, s: CtxState, color: string, args: unknown[], p: PairContrast): string {
+  const f = parseFont(c.font);
+  const t = c.getTransform();
+  let under: string | null = null;
+  const rects = s.rects;
+  if (rects?.length && t.b === 0 && t.c === 0) {
+    rects.checkSize(c.canvas.width, c.canvas.height, debug.configs);
+    const x = Number(args[1]), y = Number(args[2]);
+    if (Number.isFinite(x) && Number.isFinite(y)) {
+      // Step 1px into the run (x is its start, end or middle) and to the glyphs' vertical middle.
+      const align = c.textAlign;
+      const ux = x + (align === 'right' || align === 'end' ? -1 : align === 'center' ? 0 : 1);
+      const uy = y + f.px * (BASELINE_MID[c.textBaseline] ?? -0.35);
+      under = rects.find(t.a * ux + t.e, t.d * uy + t.f);
+    }
+  }
+  // No fill under it: the text sits on the page Docs paints (theme bg) behind the canvas.
+  return p.fix(color, under, textTarget(f.px * Math.abs(t.d), f.bold));
 }
 
 function isPicture(src: unknown): boolean {
@@ -301,10 +419,12 @@ CanvasGradient.prototype.addColorStop = function (offset: number, color: string)
 
 function configure(spec: ThemeSpec | null) {
   mapper = null;
+  pairs = null;
   styleColors = null;
   if (spec) {
     const roles = schemeToRoles(spec.scheme);
     mapper = createMapper(roles, spec.options);
+    pairs = new PairContrast(roles.fg, roles.bg);
     if (spec.options.styleColors) {
       styleColors = computeStyleColors(spec);
       loadParagraphIndex();
@@ -319,6 +439,7 @@ function configure(spec: ThemeSpec | null) {
  * Asks the app to repaint its canvases. Docs re-renders its visible tiles on visibilitychange
  * (resize/scroll/font events alone don't trigger a repaint).
  */
+if (__WD_DEV__) (debug as Record<string, unknown>).repaint = () => repaint();
 function repaint() {
   document.dispatchEvent(new Event('visibilitychange'));
   window.dispatchEvent(new Event('resize'));

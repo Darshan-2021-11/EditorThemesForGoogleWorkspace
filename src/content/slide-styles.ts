@@ -35,7 +35,7 @@ export interface ElementTextStyles {
 }
 
 /** Reads a font property from the element or, for a <tspan>, its <text>. */
-function fontProp(el: Element, prop: 'font-size' | 'font-family'): string {
+export function fontProp(el: Element, prop: 'font-size' | 'font-family' | 'font-weight'): string {
   for (let e: Element | null = el; e; e = e.tagName.toLowerCase() === 'tspan' ? e.parentElement : null) {
     const v = (e as SVGElement).style?.getPropertyValue(prop) || e.getAttribute(prop);
     if (v) return v;

@@ -1,11 +1,9 @@
 // Maps an arbitrary page color onto a theme, depending on what the color is used for.
 import {
-  clamp, contrast, ensureContrast, formatColor, fromOklch, mixOklab, parseColor, toOklch, type RGBA,
+  clamp, ensureContrast, formatColor, fromOklch, mixOklab, parseColor, toOklch, type RGBA,
 } from './color';
 import { nearestAccent, schemeToRoles, type AccentName, type Roles } from './roles';
 import type { ColorKind, ThemeOptions, ThemeSpec } from './types';
-
-const WHITE: RGBA = { r: 255, g: 255, b: 255, a: 1 };
 
 /** Below this OKLCH chroma a color is treated as grey. */
 const GREY_CHROMA = 0.02;
@@ -45,6 +43,23 @@ export function rampAt(roles: Roles, t: number): RGBA {
   return r[r.length - 1].c;
 }
 
+/**
+ * Text color readable (≥ target, WCAG) on every surface the theme paints UI and pages with —
+ * background, panels, raised panels — plus `tint` (the pale fill of the text's own hue, as on a
+ * selected item), so it can't fail when it lands on any of them.
+ */
+export function readableOnSurfaces(c: RGBA, roles: Roles, target: number, tint?: RGBA): RGBA {
+  let out = c;
+  // the surfaces sit on one side of the text's lightness: a couple of passes settle on all of them
+  for (let pass = 0; pass < 2; pass++) {
+    for (const s of [roles.bg, roles.surface, roles.surfaceAlt, ...(tint ? [tint] : [])]) out = ensureContrast(out, s, target);
+  }
+  return out;
+}
+
+/** WCAG AA for body text. */
+const TEXT_CONTRAST = 4.5;
+
 export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
   const cache = new Map<string, string>();
 
@@ -57,17 +72,26 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
     if (kind === 'text') {
       if (t < 0.12) t = 1 - t; // light text sits on dark/colored surfaces: keep it readable
       const out = rampAt(roles, t);
-      const target = Math.min(4.5, contrast(c, WHITE));
-      return withAlpha(t >= 0.12 ? ensureContrast(out, roles.bg, target) : out, c.a);
+      return withAlpha(t >= 0.12 ? readableOnSurfaces(out, roles, TEXT_CONTRAST) : out, c.a);
     }
     if (kind === 'graphic') return withAlpha(rampAt(roles, t), c.a);
     if (kind === 'fill' && t > 0.6) t = 0.1 + (1 - t) * 0.25; // dark surfaces (tooltips) stay dark-ish
     return withAlpha(rampAt(roles, t), c.a);
   }
 
+  /** A solid accent surface that text in the theme's background color stays readable on. */
+  function solid(c: RGBA): RGBA {
+    return ensureContrast(c, roles.bg, TEXT_CONTRAST);
+  }
+
+  /** The pale fill of a text color's own hue (selected items, chips): text must read on it too. */
+  function tintOf(c: RGBA): RGBA {
+    return mixOklab(roles.bg, c, 0.3, 1);
+  }
+
   function accentFill(accent: RGBA, L: number, C: number): RGBA {
     // solid buttons/badges, and mid-tone shapes in slides (a frame mustn't melt into its background)
-    if ((C > 0.1 && L < 0.75) || (C > 0.07 && L < 0.65)) return accent;
+    if ((C > 0.1 && L < 0.75) || (C > 0.07 && L < 0.65)) return solid(accent);
     const k = clamp(0.18 + C * 1.2 + (1 - L) * 0.5, 0.18, 0.6);
     return mixOklab(roles.bg, accent, k, 1);
   }
@@ -76,7 +100,7 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
     const name = forced === 'link' ? (options.styleColors ? null : 'blue') : forced ?? nearestAccent(H);
     const accent = name ? roles.accents[name] : roles.link;
     if (forced || options.mapping === 'snap') {
-      if (kind === 'text') return withAlpha(ensureContrast(accent, roles.bg, 3.5), c.a);
+      if (kind === 'text') return withAlpha(readableOnSurfaces(accent, roles, TEXT_CONTRAST, tintOf(accent)), c.a);
       if (kind === 'line') return withAlpha(accent, c.a);
       return withAlpha(accentFill(accent, L, C), c.a);
     }
@@ -85,9 +109,9 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
     if (kind === 'text' || kind === 'line') {
       const L0 = roles.isDark ? Math.max(L, 0.72) : Math.min(L, 0.55);
       const out = fromOklch([L0, chroma, H]);
-      return withAlpha(kind === 'text' ? ensureContrast(out, roles.bg, 4.5) : out, c.a);
+      return withAlpha(kind === 'text' ? readableOnSurfaces(out, roles, TEXT_CONTRAST, tintOf(out)) : out, c.a);
     }
-    if (C > 0.1 && L < 0.75) return withAlpha(fromOklch([roles.isDark ? 0.62 : 0.55, Math.min(C, 0.17), H]), c.a);
+    if (C > 0.1 && L < 0.75) return withAlpha(solid(fromOklch([roles.isDark ? 0.62 : 0.55, Math.min(C, 0.17), H])), c.a);
     const k = clamp(0.18 + C * 1.2 + (1 - L) * 0.5, 0.18, 0.6);
     return withAlpha(mixOklab(roles.bg, fromOklch([0.65, Math.min(C * 1.5, 0.15), H]), k, 1), c.a);
   }
@@ -98,8 +122,12 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
     const lch = toOklch(c);
     const forced = SEMANTIC[hex ?? formatColor({ ...c, a: 1 })];
     const out = forced ? mapChromatic(c, lch, kind, forced) : lch[1] < GREY_CHROMA ? mapGrey(lch[0], c, kind) : mapChromatic(c, lch, kind);
-    // Translucent ink (disabled items, hints) fades much more on dark backgrounds than on white.
-    if (kind === 'text' && out.a < 0.7 && roles.isDark) out.a = 0.3 + out.a * 0.6;
+    if (kind === 'text' && out.a < 1) {
+      // Secondary text drawn translucent loses contrast once blended: settle it as a solid,
+      // readable color. Fainter ink (≤ 0.5: disabled items) just fades less on dark themes.
+      if (c.a >= 0.5) return { ...readableOnSurfaces(mixOklab(roles.bg, out, out.a, 1), roles, TEXT_CONTRAST), a: 1 };
+      if (roles.isDark) out.a = 0.3 + out.a * 0.6;
+    }
     return out;
   }
 

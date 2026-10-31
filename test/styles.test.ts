@@ -19,7 +19,8 @@ describe('document style colors', () => {
 
   it('keep-hue colors that are not in the palette become their own color option', () => {
     const spec = { scheme: nord, options: { ...DEFAULT_OPTIONS, mapping: 'keep-hue' as const } };
-    const v = styleValueForDocColor(spec, '#ff00aa', 'h1');
+    // vivid lime: far from Nord's muted green even after readability nudges
+    const v = styleValueForDocColor(spec, '#66ff00', 'h1');
     expect(v).toMatch(/^#[0-9a-f]{6}$/);
     expect(styleColors({ ...spec, options: { ...spec.options, styleSlots: { ...spec.options.styleSlots, h1: v } } }).h1).toBe(v);
   });
