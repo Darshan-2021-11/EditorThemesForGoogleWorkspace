@@ -55,7 +55,7 @@ dark mode, google docs, google sheets, google slides, themes, nord, dracula, sol
 
 ## License
 
-(Choose in the form: for example MIT, or All Rights Reserved.)
+All Rights Reserved (choose this in the form). The full terms are in the `LICENSE` file, which is included in the add-on package.
 
 ## Privacy policy
 

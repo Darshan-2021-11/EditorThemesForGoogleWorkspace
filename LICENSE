@@ -1,0 +1,27 @@
+Editor Themes for Google Workspace
+Copyright (c) 2026 darsh. All rights reserved.
+
+This software, including its source code, compiled code, icons, documentation
+and other files (the "Software"), is the property of the copyright holder.
+
+You may install and use the Software as published on addons.mozilla.org for
+your personal use.
+
+You may NOT, without prior written permission from the copyright holder:
+  - copy, reproduce or redistribute the Software, in whole or in part;
+  - modify, adapt, translate or create derivative works based on it;
+  - publish it, or any work based on it, as your own add-on or extension in any
+    store or distribution channel;
+  - sell, sublicense, rent or otherwise commercially exploit it.
+
+Reading the code for the purpose of add-on review by the store operator (for
+example Mozilla) is permitted.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY ARISING FROM, OUT OF
+OR IN CONNECTION WITH THE SOFTWARE OR ITS USE.
+
+Third-party color schemes that you import (for example from tinted-theming on
+GitHub) are not part of the Software and remain under their own licenses.

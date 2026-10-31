@@ -14,7 +14,9 @@ npm ci            # installs the exact versions in package-lock.json
 npm run build     # TypeScript → dist/ (Vite, not minified)
 ```
 
-`dist/` is the add-on: `manifest.json`, `background.js`, `content.js`, `hook.js` and `icon.svg`.
+`dist/` is the add-on: `manifest.json`, `background.js`, `content.js`, `hook.js`, `icon.svg` and `LICENSE`.
+
+Copyright (c) 2026 darsh. All rights reserved. This source is provided for add-on review only; see `LICENSE`.
 
 To make the same zip that was uploaded:
 

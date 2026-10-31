@@ -10,6 +10,7 @@ const watch = process.argv.includes('--watch');
 const run = process.argv.includes('--run');
 // Dev builds include a postMessage test bridge used by scripts/visual-test.mjs.
 const dev = watch || process.env.WD_DEV === '1';
+const BANNER = '/*! Editor Themes for Google Workspace. Copyright (c) 2026 darsh. All rights reserved. See LICENSE. */';
 
 const entries = {
   background: 'src/background/index.ts',
@@ -23,6 +24,7 @@ await mkdir(dist, { recursive: true });
 async function copyStatic() {
   await cp(`${root}src/manifest.json`, `${dist}/manifest.json`);
   await cp(`${root}src/icon.svg`, `${dist}/icon.svg`);
+  await cp(`${root}LICENSE`, `${dist}/LICENSE`);
 }
 await copyStatic();
 
@@ -40,7 +42,8 @@ for (const [name, entry] of Object.entries(entries)) {
       target: 'firefox128',
       watch: watch ? {} : null,
       lib: { entry: `${root}${entry}`, formats: ['iife'], name: `wd_${name}`, fileName: () => `${name}.js` },
-      rollupOptions: { output: { inlineDynamicImports: true } },
+      // the copyright notice travels with every copy of the built files
+      rollupOptions: { output: { inlineDynamicImports: true, banner: BANNER } },
     },
   });
 }
