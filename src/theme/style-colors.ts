@@ -20,6 +20,14 @@ export function resolveStyleValue(spec: ThemeSpec, value: string, key: StyleKey)
   return formatColor({ ...ensureContrast(c, roles.bg, min), a: 1 });
 }
 
+/** Default ink (black / dark grey): text that keeps the theme's own colors. */
+export function isInkColor(css: string): boolean {
+  const c = parseColor(css);
+  if (!c) return false;
+  const L = 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  return Math.max(c.r, c.g, c.b) - Math.min(c.r, c.g, c.b) < 24 && L < 128;
+}
+
 export function styleColors(spec: ThemeSpec): Record<StyleKey, string> {
   const slots = { ...DEFAULT_STYLE_SLOTS, ...spec.options.styleSlots };
   return Object.fromEntries(STYLE_KEYS.map((k) => [k, resolveStyleValue(spec, slots[k], k)])) as Record<StyleKey, string>;

@@ -47,7 +47,15 @@ function styleColorFor(font: string, fill: string, text: string): string | null 
   if (learner) scheduleIndexRefresh(20000);
   const s = learner?.classify(font, text);
   if (s) return styleColors[s];
-  return isInk(fill) ? styleColors.normal : null;
+  return isNormalInk(fill) ? styleColors.normal : null;
+}
+
+/** The document's Normal text color (raw), so colored Normal text matches the panel exactly. */
+let docNormal: string | null = null;
+
+/** Body text in the Normal style's color, or default ink → the "Normal text" style color. */
+function isNormalInk(fill: string): boolean {
+  return fill === docNormal || isInk(fill);
 }
 
 const inkCache = new Map<string, boolean>();
@@ -89,7 +97,10 @@ async function fetchParagraphIndex() {
     const html = await res.text();
     const index = buildIndex(parseExportHtml(html));
     // Named-style colors go to the extension, which notices when the user changes one.
-    window.dispatchEvent(new CustomEvent(DOC_STYLES_EVENT, { detail: JSON.stringify(parseStyleColors(html)) }));
+    const docStyles = parseStyleColors(html);
+    const normal = docStyles.normal ? parseColor(docStyles.normal) : null;
+    docNormal = normal ? formatColor({ ...normal, a: 1 }) : null;
+    window.dispatchEvent(new CustomEvent(DOC_STYLES_EVENT, { detail: JSON.stringify(docStyles) }));
     if (learner) learner.setIndex(index);
     else learner = new StyleLearner(index, scheduleRepaint, () => scheduleIndexRefresh());
     if (__WD_DEV__) (debug as Record<string, unknown>).learner = learner;
@@ -321,7 +332,7 @@ function resolveTextColor(q: TextColorQuery): string | null {
     if (LINK_COLORS.has(fill)) return styleColors.link;
     const s = styleFromName(q.style) ?? learner?.tierFor(q.px);
     if (s) return styleColors[s];
-    if (isInk(fill)) return styleColors.normal;
+    if (isNormalInk(fill)) return styleColors.normal;
   }
   return mapper.map(fill, 'text');
 }

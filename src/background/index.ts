@@ -5,7 +5,7 @@ import {
 } from '../shared/messages';
 import { GOOGLE_TAB_PATTERNS, pageKey } from '../shared/page';
 import { importFromUrl, slugify } from '../theme/scheme-import';
-import { styleValueForDocColor } from '../theme/style-colors';
+import { isInkColor, styleValueForDocColor } from '../theme/style-colors';
 import {
   DEFAULT_OPTIONS, DEFAULT_STYLE_SLOTS, STYLE_KEYS, type Scheme, type ThemeOptions, type ThemeSpec,
 } from '../theme/types';
@@ -263,12 +263,24 @@ const handlers: { [K in Request['type']]: (req: Extract<Request, { type: K }>, s
     const before = page?.docStyles;
     const overrides = { ...page?.styleOverrides };
     let changed = false;
-    if (before) {
-      const theme = spec(c, effective(c, key));
+    const theme = spec(c, effective(c, key));
+    if (before && theme) {
       for (const k of STYLE_KEYS) {
         const now = req.colors[k];
-        if (!now || now === before[k] || !theme) continue;
+        // only a style seen before with a different color was restyled by the user
+        if (!now || before[k] === undefined || now === before[k]) continue;
         overrides[k] = styleValueForDocColor(theme, now, k);
+        changed = true;
+      }
+    }
+    // Normal text: a colored Normal style is always shown (the page follows it anyway), so the
+    // panel must too, even if it was already colored the first time we looked.
+    if (theme && req.colors.normal) {
+      // black/dark grey Normal text = default → the theme's own Normal color (no override)
+      const want = isInkColor(req.colors.normal) ? undefined : styleValueForDocColor(theme, req.colors.normal, 'normal');
+      if (overrides.normal !== want) {
+        if (want === undefined) delete overrides.normal;
+        else overrides.normal = want;
         changed = true;
       }
     }

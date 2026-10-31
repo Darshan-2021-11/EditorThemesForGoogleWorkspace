@@ -298,7 +298,10 @@ export class Panel {
     // the exact colors the page paints with (same function as the canvas hook)
     const shown = styleColors({ ...current, options: { ...current.options, styleSlots: slots } });
     const pick = (k: StyleKey, value: string) => send({ type: 'setStyleSlot', style: k, value });
-    const nameInput = h('input', { type: 'text', placeholder: `${current.scheme.name} (my colors)` });
+    const nameInput = h('input', {
+      type: 'text',
+      placeholder: current.scheme.source === 'custom' ? current.scheme.name : `${current.scheme.name} (my colors)`,
+    });
     return h('div', { class: 'styles' },
       STYLE_KEYS.map((k) => {
         const fromDoc = k in overrides;
