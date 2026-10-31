@@ -1,4 +1,17 @@
+# dependencies and build output (recreate with `npm ci` / `npm run build`)
 node_modules/
 dist/
 artifacts/
+coverage/
+
+# dev Firefox profile: holds your Google login cookies, never commit it
 .web-ext-profile/
+
+# local clutter
+*.log
+.env
+.env.*
+.DS_Store
+Thumbs.db
+.idea/
+/Screenshot *.png

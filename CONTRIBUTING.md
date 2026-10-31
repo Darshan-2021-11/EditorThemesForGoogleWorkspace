@@ -51,13 +51,62 @@ npm run typecheck  # TypeScript
 npm run build && npm run lint:ext   # Mozilla's add-on linter on dist/
 ```
 
-For changes that affect colors or contrast, also run the contrast audit. It must not report new failures:
+For changes that affect colors or contrast, also run the contrast audit (see Testing). It must not report new failures.
+
+## Testing
+
+There are three layers. Only the first is needed for most changes.
+
+### 1. Unit tests (no browser)
 
 ```sh
-node scripts/contrast-audit.mjs public
+npm test
 ```
 
-See the README for the other dev scripts (visual tests and the page probe).
+Vitest runs the pure logic: color math, theme mapping and contrast, scheme parsing, CSS remapping, picture recoloring, Slides text styles, and storage migration. Tests live in `test/`. Add tests there for any new pure function.
+
+### 2. Browser tests on public pages (headless Firefox)
+
+These open real Google pages in a headless Firefox with a dev build of the add-on and write their results to `artifacts/`. You need:
+
+- Firefox installed in its default location.
+- Nothing else: `selenium-webdriver` downloads the matching geckodriver on first run (Selenium Manager). That needs internet access, as do the tests themselves.
+
+| Command | What it checks | Output |
+|---|---|---|
+| `npm run visual-test` | A public Doc with several themes: menus, panel, revert, and a themed print-to-PDF | `artifacts/visual/` |
+| `node scripts/smoke-apps.mjs [sheets\|slides\|forms]` | Public Sheets, Slides and Forms pages: default, themed, and after reload | `artifacts/visual/app-*.png` |
+| `node scripts/contrast-audit.mjs public` | WCAG contrast of every visible text against its real backdrop, across several themes | console summary, `artifacts/audit/public.json` |
+| `node scripts/debug-page.mjs <probe.js> [theme] [url]` | Runs your own probe script inside a themed page and prints what it returns | console, `artifacts/visual/debug.png` |
+
+These scripts build the dev version first. Dev builds include a small test bridge, compiled out of release builds, that lets scripts import and apply themes. Useful environment variables:
+
+- `NO_BUILD=1` reuses the last dev build. Make one with `WD_DEV=1 npm run build` (PowerShell: `$env:WD_DEV='1'; npm run build`).
+- `THEMES=base16-nord,base16-github` sets the themes for the audit.
+- `APPS=docs,slides` limits the audit to some pages.
+- `RELOAD=1` (debug-page) reloads so the theme applies from first paint.
+- `SET_ON=<url>` (debug-page) picks the theme on one page, then opens another. This checks that one theme is shared across apps.
+
+The public sample pages belong to other people. Use them for testing only, and don't put their content in screenshots you publish.
+
+### 3. Browser tests on signed-in pages (optional)
+
+Home screens, Drive and editing mode need a signed-in Google account. The scripts take a Firefox profile through `PROFILE=<dir>`:
+
+1. Use a **test Google account**, not your personal one.
+2. Run `npm run dev` once, sign in to that account in the Firefox window it opens, then close it. The login is now saved in `.web-ext-profile/`.
+3. Copy that profile somewhere under `artifacts/` (the scripts can't use it while Firefox is running), skipping caches:
+   - PowerShell: `robocopy .web-ext-profile artifacts\profile-copy /E /XF parent.lock lock /XD cache2 startupCache storage extensions`
+   - macOS/Linux: `rsync -a --exclude={parent.lock,lock,cache2,startupCache,storage,extensions} .web-ext-profile/ artifacts/profile-copy/`
+4. Run, for example, `PROFILE=artifacts/profile-copy node scripts/contrast-audit.mjs private` (PowerShell: `$env:PROFILE="$PWD\artifacts\profile-copy"`).
+5. **Delete the copy afterwards.** It contains that account's login cookies.
+
+Signed-in pages only ever get read. Like the add-on, the tests never write to the Google account.
+
+### Manual testing in your own Firefox
+
+- `npm run dev` gives you a live-reloading Firefox with the add-on.
+- To try a release build: run `npm run package`, then go to `about:debugging#/runtime/this-firefox` → **Load Temporary Add-on…** and pick the zip in `artifacts/`.
 
 ### Ground rules for changes
 
