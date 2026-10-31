@@ -1,7 +1,7 @@
 // Per-app knowledge: where the "document" lives inside each Google app's page.
 import { formatColor, type RGBA } from '../theme/color';
 import type { Roles } from '../theme/roles';
-import type { ThemeOptions } from '../theme/types';
+import type { StyleKey, ThemeOptions } from '../theme/types';
 import type { AppId } from '../shared/page';
 
 export interface AppProfile {
@@ -21,8 +21,11 @@ export interface AppProfile {
     /** The text-color button's color bar, plus the toolbar boxes describing the cursor's text. */
     textIndicator: string; fontSize: string; zoom: string; paragraphStyle: string;
   };
-  /** CSS for the document surface (page background, image dimming). */
-  docCss(r: Roles, o: ThemeOptions): string;
+  /**
+   * CSS for the document surface (page background, image dimming). `styles` holds the
+   * paragraph-style colors when "color by paragraph style" is on.
+   */
+  docCss(r: Roles, o: ThemeOptions, styles: Record<StyleKey, string> | null): string;
   /** Extra UI CSS. */
   uiCss(r: Roles): string;
 }
@@ -66,6 +69,32 @@ const sheets: AppProfile = {
   uiCss: () => '',
 };
 
+// Slides draw each slide as inline SVG (editor, filmstrip, speaker notes): recolored attribute
+// by attribute, with shapes as fills and <text> as text.
+const SLIDE_SVG = '#pages svg, .punch-filmstrip-thumbnails, #speakernotes-workspace svg';
+const slides: AppProfile = {
+  app: 'slides',
+  docRegion: SLIDE_SVG,
+  canvasDoc: false,
+  keepColors: KEEP_COLORS,
+  docCss: (_r, o) => (o.dimImages ? `:is(${SLIDE_SVG}) image { filter: brightness(${o.dimAmount}) !important; }` : ''),
+  uiCss: () => '',
+};
+
+// Forms (editor and responder view): the form title and question titles take style colors.
+const forms: AppProfile = {
+  app: 'forms',
+  docRegion: '',
+  canvasDoc: false,
+  keepColors: KEEP_COLORS,
+  docCss: (_r, o, s) =>
+    (s ? `[role="heading"][aria-level="1"]:not([role="dialog"] *) { color: ${s.title} !important; }
+      [role="heading"][aria-level="2"]:not([role="dialog"] *) { color: ${s.h1} !important; }
+      [role="listitem"] [role="heading"][aria-level="3"]:not([role="dialog"] *) { color: ${s.h2} !important; }` : '') +
+    (o.dimImages ? `form img, [role="listitem"] img { filter: brightness(${o.dimAmount}) !important; }` : ''),
+  uiCss: () => '',
+};
+
 const plain = (app: AppId): AppProfile => ({
   app,
   docRegion: '',
@@ -78,5 +107,7 @@ const plain = (app: AppId): AppProfile => ({
 export function profileFor(app: AppId): AppProfile {
   if (app === 'docs') return docs;
   if (app === 'sheets') return sheets;
+  if (app === 'slides') return slides;
+  if (app === 'forms') return forms;
   return plain(app);
 }

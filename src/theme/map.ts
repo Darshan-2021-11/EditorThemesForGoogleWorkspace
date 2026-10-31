@@ -65,7 +65,8 @@ export function createMapper(roles: Roles, options: ThemeOptions): Mapper {
   }
 
   function accentFill(accent: RGBA, L: number, C: number): RGBA {
-    if (C > 0.1 && L < 0.75) return accent; // solid buttons/badges
+    // solid buttons/badges, and mid-tone shapes in slides (a frame mustn't melt into its background)
+    if ((C > 0.1 && L < 0.75) || (C > 0.07 && L < 0.65)) return accent;
     const k = clamp(0.18 + C * 1.2 + (1 - L) * 0.5, 0.18, 0.6);
     return mixOklab(roles.bg, accent, k, 1);
   }

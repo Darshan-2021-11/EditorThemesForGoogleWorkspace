@@ -29,6 +29,7 @@ const states = new WeakMap<object, CtxState>();
 const debug = {
   active: false, configs: 0, calls: {} as Record<string, number>,
   fonts: {} as Record<string, number>, samples: {} as Record<string, string>,
+  trace: [] as unknown[],
 };
 if (__WD_DEV__) (window as unknown as { __wdHookDebug: typeof debug }).__wdHookDebug = debug;
 
@@ -217,6 +218,13 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
           }
         }
         before(this, args);
+        if (__WD_DEV__) {
+          const trace = (debug as { trace?: unknown[] }).trace;
+          if (trace && trace.length < 4000) {
+            const cv = (this as CanvasRenderingContext2D).canvas;
+            trace.push([name, `${String(this.fillStyle)}>${String(getFill(this))}`, `${String(this.strokeStyle)}>${String(getStroke(this))}`, cv?.width, !!mapper, args.slice(0, 4).map((a) => (typeof a === 'number' ? Math.round(a) : String(a).slice(0, 20)))]);
+          }
+        }
         return orig.apply(this, args);
       },
     });
@@ -254,6 +262,11 @@ function patch(proto: typeof CanvasRenderingContext2D.prototype | typeof Offscre
 
   const drawImage = proto.drawImage as (...a: unknown[]) => void;
   proto.drawImage = function (this: Ctx2D, ...args: unknown[]) {
+    if (__WD_DEV__) {
+      const trace = (debug as { trace?: unknown[] }).trace;
+      const src = args[0] as { constructor?: { name?: string }; width?: number };
+      if (trace && trace.length < 4000) trace.push(['drawImage', src?.constructor?.name, src?.width, (this as CanvasRenderingContext2D).canvas?.width, args.slice(1, 5).map((a) => Math.round(Number(a)))]);
+    }
     if (mapper?.options.dimImages && isPicture(args[0])) {
       const prev = this.filter;
       this.filter = `brightness(${mapper.options.dimAmount})`;
@@ -310,6 +323,44 @@ function configure(spec: ThemeSpec | null) {
 function repaint() {
   document.dispatchEvent(new Event('visibilitychange'));
   window.dispatchEvent(new Event('resize'));
+  repaintSheetsGrid();
+}
+
+/**
+ * Sheets ignores those events and blits old pixels when scrolling, so scroll each axis a full
+ * screen away and back (about four frames): everything visible is drawn afresh.
+ */
+let sheetsScrolling = false;
+let sheetsAgain = false;
+async function repaintSheetsGrid() {
+  const sy = document.querySelector<HTMLElement>('.native-scrollbar-y');
+  const sx = document.querySelector<HTMLElement>('.native-scrollbar-x');
+  if (!sy && !sx) return;
+  if (sheetsScrolling) {
+    // a newer config arrived mid-bounce: repaint once more afterwards
+    sheetsAgain = true;
+    return;
+  }
+  sheetsScrolling = true;
+  const frame = () => new Promise((r) => requestAnimationFrame(r));
+  const bounce = async (el: HTMLElement | null, prop: 'scrollTop' | 'scrollLeft', size: number, max: number) => {
+    if (!el || max <= 0) return;
+    const at = el[prop];
+    el[prop] = at + size + 50 <= max ? at + size + 50 : Math.max(0, at - size - 50);
+    await frame(); await frame();
+    el[prop] = at;
+    await frame(); await frame();
+  };
+  try {
+    if (sy) await bounce(sy, 'scrollTop', sy.clientHeight, sy.scrollHeight - sy.clientHeight);
+    if (sx) await bounce(sx, 'scrollLeft', sx.clientWidth, sx.scrollWidth - sx.clientWidth);
+  } finally {
+    sheetsScrolling = false;
+  }
+  if (sheetsAgain) {
+    sheetsAgain = false;
+    repaintSheetsGrid();
+  }
 }
 
 /** Debounced repaint for when style recognition improves; capped so it can't loop. */

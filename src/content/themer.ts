@@ -4,6 +4,7 @@ import { ANSWER_EVENT, CONFIG_EVENT, QUERY_EVENT, READY_EVENT, type TextColorQue
 import { formatColor, hex8, luminance, parseColor, type RGBA } from '../theme/color';
 import { createMapper, type Mapper } from '../theme/map';
 import { schemeToRoles, type Roles } from '../theme/roles';
+import { styleColors } from '../theme/style-colors';
 import type { ColorKind, ThemeSpec } from '../theme/types';
 import { extractColorRules, renderRules, type ColorRule } from './css-remap';
 import type { AppProfile } from './profiles';
@@ -129,7 +130,7 @@ export class PageThemer {
         `html,body{background-color:${hex(r.bg)};}` +
         `::selection{background-color:${formatColor({ ...r.selection, a: 0.85 })};}` +
         this.profile.uiCss(r) +
-        this.profile.docCss(r, this.spec!.options);
+        this.profile.docCss(r, this.spec!.options, this.spec!.options.styleColors ? styleColors(this.spec!) : null);
     }
     // Order doesn't matter for these: per-sheet overrides sit right after their source sheet and
     // inline/document rules are !important.

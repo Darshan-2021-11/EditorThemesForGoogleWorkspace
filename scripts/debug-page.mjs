@@ -38,6 +38,11 @@ try {
   }
   await bridge({ wdTest: 'set', theme: theme === 'null' ? null : theme });
   await driver.sleep(2500);
+  // RELOAD=1: reload so the remembered theme applies from first paint.
+  if (process.env.RELOAD) {
+    await driver.navigate().refresh();
+    await driver.sleep(8000);
+  }
   // The probe may be async: it runs as `async () => { ... }` and its return value is printed.
   const result = await driver.executeAsyncScript(
     `const done = arguments[arguments.length - 1]; (async () => { ${probe} })().then(done, (e) => done({ probeError: String(e) }));`,

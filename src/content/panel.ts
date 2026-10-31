@@ -63,6 +63,7 @@ export class Panel {
   private draft: Scheme | null = null;
   private optionsCache = new Map<string, ThemeOptions>();
   private previewTimer = 0;
+  private previewGen = 0;
 
   constructor(private host: PanelHost) {}
 
@@ -96,7 +97,7 @@ export class Panel {
   }
 
   close() {
-    this.host.endPreview();
+    this.cancelPreview();
     this.hostEl?.remove();
   }
 
@@ -193,7 +194,7 @@ export class Panel {
       ),
     );
     if (current) wrap.append(this.renderOptions(current));
-    const list = h('div', { class: 'list', role: 'listbox', onmouseleave: () => this.host.endPreview() });
+    const list = h('div', { class: 'list', role: 'listbox', onmouseleave: () => this.cancelPreview() });
     const fill = () => {
       const q = this.query.toLowerCase();
       list.replaceChildren(
@@ -241,14 +242,22 @@ export class Panel {
 
   private schedulePreview(s: Scheme) {
     clearTimeout(this.previewTimer);
+    const gen = ++this.previewGen;
     this.previewTimer = window.setTimeout(async () => {
-      this.host.preview({ scheme: s, options: await this.options(s.id) });
+      const options = await this.options(s.id);
+      // The pointer left (or a theme was chosen) while options loaded: don't resurrect the preview.
+      if (gen === this.previewGen) this.host.preview({ scheme: s, options });
     }, 90);
   }
 
-  private async choose(id: string | null) {
+  private cancelPreview() {
     clearTimeout(this.previewTimer);
+    this.previewGen++;
     this.host.endPreview();
+  }
+
+  private async choose(id: string | null) {
+    this.cancelPreview();
     await send({ type: 'setPageTheme', theme: id });
   }
 
